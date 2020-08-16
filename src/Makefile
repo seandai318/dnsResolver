@@ -17,7 +17,7 @@ endif
 
 LDFLAGS = -lpthread
 
-libdns: $(obj)
+libdns.a: $(obj)
 	$(AR) -cr $@ $^
 
 -include $(dep)   # include all dep files in the makefile
