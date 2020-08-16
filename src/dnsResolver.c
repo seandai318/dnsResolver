@@ -418,6 +418,7 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 		goto EXIT;
 	}
 
+	tpInfo.local.sin_addr.s_addr = 0;	//use the default ip in the tp layer
     tpInfo.peer = pServerInfo->socketAddr;
 	tpInfo.udpInfo.isUdpWaitResponse = true;
 	tpInfo.udpInfo.isEphemeralPort = true;
@@ -883,6 +884,7 @@ static void dns_onQCacheTimeout(uint64_t timerId, void* ptr)
 			goto EXIT;
 		}
 
+    	tpInfo.local.sin_addr.s_addr = 0;   //use the default ip in the tp layer
     	tpInfo.peer = pServerInfo->socketAddr;
     	tpInfo.udpInfo.isUdpWaitResponse = true;
     	tpInfo.udpInfo.isEphemeralPort = true;

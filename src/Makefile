@@ -17,7 +17,7 @@ endif
 
 LDFLAGS = -lpthread
 
-libdiacommon.a: $(obj)
+libdns: $(obj)
 	$(AR) -cr $@ $^
 
 -include $(dep)   # include all dep files in the makefile
