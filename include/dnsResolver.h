@@ -90,7 +90,7 @@ typedef struct {
 
 
 typedef struct {
-	const dnsServer_t* dnsServer;
+	dnsServer_t dnsServer[DNS_MAX_SERVER_NUM];
 	int serverNum;
 	osNodeSelMode_e serverSelMode;
 } dnsServerConfig_t;

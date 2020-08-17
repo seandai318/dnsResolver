@@ -6,6 +6,7 @@
  */
 
 
+#include <endian.h>
 #include <string.h>
 
 #include "osSockAddr.h"
@@ -77,7 +78,7 @@ static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, 
 static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData);
 static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData);
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf);
-static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf);
+static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, uint8_t* replyCode);
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri);
 static osStatus_e dnsParseQuestion(osMBuf_t* pBuf, dnsQuestion_t* pQuery);
 static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR);
@@ -177,6 +178,7 @@ EXIT:
 */
 osStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsResover_callback_h rrCallback, void* pData)
 {
+	DEBUG_BEGIN
 	osStatus_e status = OS_STATUS_OK;
 
 	if(!qName || !qResponse || !rrCallback)
@@ -216,6 +218,7 @@ osStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dn
 	status = dnsPerformQuery(qName, qType, isCacheRR, rrCallback, pData);
 
 EXIT:
+	DEBUG_END
 	return status;
 }	
 
@@ -362,13 +365,6 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 	dnsQCacheInfo_t* pQCache = NULL;
 	dnsQAppInfo_t* pQAppInfo = NULL;
 
-	if(!pBuf)
-	{
-		logError("fails to osMBuf_alloc_r.");
-		status = OS_ERROR_MEMORY_ALLOC_FAILURE;
-		goto EXIT;
-	}	
-
 	pQCache = oszalloc(sizeof(dnsQCacheInfo_t), dnsQCacheInfo_cleanup);
 	if(!pQCache)
 	{
@@ -378,6 +374,13 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 	}
 
 	pBuf = osMBuf_alloc_r(DNS_MAX_MSG_SIZE);
+    if(!pBuf)
+    {
+        logError("fails to osMBuf_alloc_r.");
+        status = OS_ERROR_MEMORY_ALLOC_FAILURE;
+        goto EXIT;
+    }
+
 	pQCache->pBuf = pBuf;
 
     pQAppInfo = osmalloc(sizeof(dnsQAppInfo_t), NULL);
@@ -397,14 +400,34 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 	osList_append(&pQCache->appDataList, pQAppInfo);
 
 	//fill the query header
-	osMBuf_writeU16(pBuf, dnsCreateTrId(), true);
-	osMBuf_writeU16(pBuf, 1<<DNS_RD_POS, true);
-	osMBuf_writeU16(pBuf, 1, true);
-	osMBuf_writeU32(pBuf, 0, true);
+	osMBuf_writeU16(pBuf, dnsCreateTrId(), true);			//transaction ID
+	osMBuf_writeU16(pBuf, htobe16(1<<DNS_RD_POS), true);	//flags
+	osMBuf_writeU16(pBuf, htobe16(1), true);				//qustions
+	osMBuf_writeU32(pBuf, 0, true);					//answer, authority RRs
+	osMBuf_writeU16(pBuf, 0, true);					//additional RRs
 
- 	osMBuf_writeBuf(pBuf, qName->pl.p, qName->pl.l, true);
-	osMBuf_writeU16(pBuf, qType, true);
-	osMBuf_writeU16(pBuf, DNS_CLASS_IN, true);
+	//fill uri
+	size_t labelPos = pBuf->pos++;
+	uint8_t labelCount = 0;
+	for(int i=0; i<qName->pl.l; i++)
+	{
+		if(qName->pl.p[i] == '.')
+		{
+			pBuf->buf[labelPos] = labelCount;
+			labelCount = 0;
+			labelPos = pBuf->pos++;
+		}
+		else
+		{
+			labelCount++;
+ 			osMBuf_writeU8(pBuf, qName->pl.p[i], true);
+		}
+	}
+	pBuf->buf[labelPos] = labelCount;
+	osMBuf_writeU8(pBuf, 0, true);
+
+	osMBuf_writeU16(pBuf, htobe16(qType), true);
+	osMBuf_writeU16(pBuf, htobe16(DNS_CLASS_IN), true);
 
 	//send message to tp to be transmitted.  support UDP only.  true is for persistent
 	transportInfo_t tpInfo;
@@ -463,6 +486,7 @@ EXIT:
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 {
 	osStatus_e status = OS_STATUS_OK;
+	uint8_t replyCode = 0;
 	dnsMessage_t* pDnsMsg = NULL;
     dnsQCacheInfo_t* pQCache = NULL;
 	dnsRRCacheInfo_t* pRRCache = NULL;
@@ -470,11 +494,12 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 	//some thing is wrong with a udp fd.  For query waiting on the fd, the timeout will take care of it
 	if(tStatus != TRANSPORT_STATUS_UDP)
 	{
+		//to-do, need to check replycode, try to match qcache and notify app
 		logInfo("tStatus(%d) != TRANSPORT_STATUS_UDP, ignore.");
 		goto EXIT;
 	}
 
-	pDnsMsg = dnsParseMessage(pBuf);
+	pDnsMsg = dnsParseMessage(pBuf, &replyCode);
 	if(!pDnsMsg)
 	{
 		logError("fails to dnsParseMessage.");
@@ -541,10 +566,24 @@ EXIT:
 
 
 
-static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf)
+static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, uint8_t* replyCode)
 {
 	osStatus_e status = OS_STATUS_OK;
-	dnsMessage_t* pDnsMsg = osmalloc(sizeof(dnsMessage_t), NULL);
+	dnsMessage_t* pDnsMsg = NULL;
+
+	uint16_t trId = htobe16(*(uint16_t*)pBuf->buf);
+	pBuf->pos += 2;
+	uint16_t flags = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+	pBuf->pos += 2;
+	*replyCode = flags && DNS_RCODE_MASK;
+	if(*replyCode != 0)
+	{
+		logInfo("dns server returns error for the query, replyCode=%d", replyCode);
+		status = OS_ERROR_INVALID_VALUE;
+		goto EXIT;
+	}
+
+	pDnsMsg = osmalloc(sizeof(dnsMessage_t), NULL);
 	if(!pDnsMsg)
 	{
 		logError("fails to osmalloc for dnsMessage_t.");
@@ -553,8 +592,8 @@ static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf)
 	}
 //	pDnsMsg->pMBufRef = NULL;
 
-	pDnsMsg->hdr = *(dnsHdr_t*)pBuf->buf;
-	pBuf->pos = 12;
+	pDnsMsg->hdr.qdCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+	pBuf->pos += 2;
 	if(pDnsMsg->hdr.qdCount != 1)
 	{
 		logError("only support pDnsMsg->hdr.qdCount = 1, but the received pDnsMsg->hdr.qdCount=%d.", pDnsMsg->hdr.qdCount);
@@ -563,20 +602,31 @@ static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf)
 	}
 
 	//only parse the maximum DNS_MAX_RR_NUM records.
+    pDnsMsg->hdr.anCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+    pBuf->pos += 2;
 	if(pDnsMsg->hdr.anCount > DNS_MAX_RR_NUM)
 	{
 		logInfo("received pDnsMsg->hdr.anCount(%d) is more than DNS_MAX_RR_NUM(%d), only parse DNS_MAX_RR_NUM rr.", pDnsMsg->hdr.anCount, DNS_MAX_RR_NUM);
-		pDnsMsg->hdr.anCount = DNS_MAX_RR_NUM;
+        status = OS_ERROR_INVALID_VALUE;
+        goto EXIT;
 	}
+
+    pDnsMsg->hdr.nsCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+    pBuf->pos += 2;
 	if(pDnsMsg->hdr.nsCount > DNS_MAX_RR_NUM)
 	{
         logInfo("received pDnsMsg->hdr.nsCount(%d) is more than DNS_MAX_RR_NUM(%d), only parse DNS_MAX_RR_NUM rr.", pDnsMsg->hdr.nsCount, DNS_MAX_RR_NUM);
-		pDnsMsg->hdr.nsCount = DNS_MAX_RR_NUM;
+        status = OS_ERROR_INVALID_VALUE;
+        goto EXIT;
 	}
+
+    pDnsMsg->hdr.arCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+    pBuf->pos += 2;
     if(pDnsMsg->hdr.arCount > DNS_MAX_RR_NUM)
     {
         logInfo("received pDnsMsg->hdr.arCount(%d) is more than DNS_MAX_RR_NUM(%d), only parse DNS_MAX_RR_NUM rr.", pDnsMsg->hdr.arCount, DNS_MAX_RR_NUM);
-		pDnsMsg->hdr.arCount = DNS_MAX_RR_NUM;
+        status = OS_ERROR_INVALID_VALUE;
+        goto EXIT;
 	}
 
 	status = dnsParseQuestion(pBuf, &pDnsMsg->query);
@@ -642,7 +692,7 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
     if(labelSize > 0xc0)
     {
 		//0x3fff = the first 2 bits of a 16 bits value are 0
-        uint16_t origUriPos = *(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff;
+        uint16_t origUriPos = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff);
         strcpy(pUri, &pBuf->buf[origUriPos]);
 		pBuf->pos += 2;
 		goto EXIT;
@@ -664,7 +714,7 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 		//a serial of labels
 		if(labelSize > 0xc0)
 	    {
-        	uint16_t origUriPos = *(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff;
+        	uint16_t origUriPos = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff);
 			//copy the uri before this label, note the label has been replace with '.' in earlier iteration
 			memcpy(pUri, &pBuf->buf[origPos1], pBuf->pos-origPos1);
 			//copy the remaining uri since the offset label is used, per rfc1035, this must be the last label
@@ -719,9 +769,9 @@ static osStatus_e dnsParseQuestion(osMBuf_t* pBuf, dnsQuestion_t* pQName)
 		goto EXIT;
 	}
 
-	pQName->qType = *(uint16_t*)&pBuf->buf[pBuf->pos];
+	pQName->qType = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
 	pBuf->pos += 2;
-	pQName->qClass = *(uint16_t*)&pBuf->buf[pBuf->pos];
+	pQName->qClass = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
 
 	if(pBuf->pos >= pBuf->size)
@@ -744,13 +794,13 @@ static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR)
         goto EXIT;
     }
 
-	pRR->type = *(uint16_t*)&pBuf->buf[pBuf->pos];
+	pRR->type = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
-	pRR->rrClass = *(uint16_t*)&pBuf->buf[pBuf->pos];
+	pRR->rrClass = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
-	pRR->ttl = *(uint32_t*)&pBuf->buf[pBuf->pos];
+	pRR->ttl = htobe32(*(uint32_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 4;
-	pRR->rDataLen = *(uint16_t*)&pBuf->buf[pBuf->pos];
+	pRR->rDataLen = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
 
 	switch(pRR->type)
@@ -763,16 +813,16 @@ static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR)
 				goto EXIT;
 			}
 
-			pRR->ipAddr.s_addr = *(uint32_t*)&pBuf->buf[pBuf->pos];
+			pRR->ipAddr.s_addr = htobe32(*(uint32_t*)&pBuf->buf[pBuf->pos]);
 			pBuf->pos += 4;
 			break;
 		case DNS_QTYPE_SRV:
 			//based on rfc 2782
-            pRR->srv.priority = *(uint16_t*)&pBuf->buf[pBuf->pos];
+            pRR->srv.priority = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
             pBuf->pos += 2;
-            pRR->srv.weight = *(uint16_t*)&pBuf->buf[pBuf->pos];
+            pRR->srv.weight = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
             pBuf->pos += 2;
-            pRR->srv.port = *(uint16_t*)&pBuf->buf[pBuf->pos];
+            pRR->srv.port = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
             pBuf->pos += 2;
 
             //process target
@@ -782,9 +832,9 @@ static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR)
 			break;
 		case DNS_QTYPE_NAPTR:
 			//based on rfc 2915
-			pRR->naptr.order = *(uint16_t*)&pBuf->buf[pBuf->pos];
+			pRR->naptr.order = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
 		    pBuf->pos += 2;
-			pRR->naptr.pref = *(uint16_t*)&pBuf->buf[pBuf->pos];
+			pRR->naptr.pref = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
             pBuf->pos += 2;
 
 			//process flags
