@@ -78,7 +78,7 @@ static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, 
 static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData);
 static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData);
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf);
-static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, uint8_t* replyCode);
+static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode);
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri);
 static osStatus_e dnsParseQuestion(osMBuf_t* pBuf, dnsQuestion_t* pQuery);
 static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR);
@@ -440,6 +440,7 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 		status = OS_ERROR_NETWORK_FAILURE;
 		goto EXIT;
 	}
+	pQCache->pServerInfo = pServerInfo;
 
 	tpInfo.local.sin_addr.s_addr = 0;	//use the default ip in the tp layer
     tpInfo.peer = pServerInfo->socketAddr;
@@ -486,7 +487,7 @@ EXIT:
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 {
 	osStatus_e status = OS_STATUS_OK;
-	uint8_t replyCode = 0;
+	dnsRcode_e replyCode = 0;
 	dnsMessage_t* pDnsMsg = NULL;
     dnsQCacheInfo_t* pQCache = NULL;
 	dnsRRCacheInfo_t* pRRCache = NULL;
@@ -526,11 +527,13 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 	pQCache->pServerInfo->noRspCount = 0;
 
 	//app does not want this RR to cache, or response set ttl=0 (use the first answer if there is more than one answer
-	if(!pQCache->isCacheRR || !pDnsMsg->answer[0].ttl)
+	if(!pQCache->isCacheRR || replyCode != DNS_RCODE_NO_ERROR || !pDnsMsg->answer[0].ttl)
 	{
+		logInfo("do not cache rr for qName(%r), qType=%d", &qName, pDnsMsg->query.qType);
 		goto EXIT;
 	}
 
+debug("to-remove, replyCode=%d, replyCode != DNS_RCODE_NO_ERROR=%d", replyCode, replyCode != DNS_RCODE_NO_ERROR);
 	//cache the response in the rrCache, create a rrCache data structure
 	pRRCache = osmalloc(sizeof(dnsRRCacheInfo_t), dnsRRCacheInfo_cleanup);
 
@@ -566,7 +569,7 @@ EXIT:
 
 
 
-static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, uint8_t* replyCode)
+static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode)
 {
 	osStatus_e status = OS_STATUS_OK;
 	dnsMessage_t* pDnsMsg = NULL;
@@ -574,11 +577,12 @@ static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, uint8_t* replyCode)
 	uint16_t trId = htobe16(*(uint16_t*)pBuf->buf);
 	pBuf->pos += 2;
 	uint16_t flags = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+debug("to-remove, flags=0x%x", flags);
 	pBuf->pos += 2;
-	*replyCode = flags && DNS_RCODE_MASK;
-	if(*replyCode != 0)
+	*replyCode = flags & DNS_RCODE_MASK;
+	if(*replyCode == DNS_RCODE_FORMAT_ERROR)
 	{
-		logInfo("dns server returns error for the query, replyCode=%d", replyCode);
+		logInfo("dns server returns format error for the query, trId=%d", trId);
 		status = OS_ERROR_INVALID_VALUE;
 		goto EXIT;
 	}
@@ -590,8 +594,8 @@ static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, uint8_t* replyCode)
 		status = OS_ERROR_MEMORY_ALLOC_FAILURE;
 		goto EXIT;
 	}
-//	pDnsMsg->pMBufRef = NULL;
 
+	pDnsMsg->hdr.flags = flags;
 	pDnsMsg->hdr.qdCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
 	pBuf->pos += 2;
 	if(pDnsMsg->hdr.qdCount != 1)
@@ -684,65 +688,65 @@ EXIT:
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 {
 	osStatus_e status = OS_STATUS_OK;
-	size_t origPos = pBuf->pos;
 
-	int labelCount = 0;
-	uint8_t labelSize = pBuf->buf[pBuf->pos];
-	//0xc0 = the firtst 2 bits of a 16 bits field are 1, per rfc1035 section 4.1.4, it indicates the domain name is a pointer
-    if(labelSize > 0xc0)
-    {
-		//0x3fff = the first 2 bits of a 16 bits value are 0
-        uint16_t origUriPos = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff);
-        strcpy(pUri, &pBuf->buf[origUriPos]);
-		pBuf->pos += 2;
-		goto EXIT;
-	}
-
-	if(labelSize > DNS_MAX_DOMAIN_NAME_LABEL_SIZE)
-    {
-        logError("a domain name label size (%d) is bigger than maximum allowed(%d).", labelSize, DNS_MAX_DOMAIN_NAME_LABEL_SIZE);
-        pBuf->pos = origPos;
-        status = OS_ERROR_INVALID_VALUE;
+    //it is possible labelSize=0, indicating the domain name is <Root>
+	if(pBuf->buf[pBuf->pos] == 0)
+	{
+        pUri[0] = 0;
+		pBuf->pos++;
         goto EXIT;
     }
 
-	size_t origPos1 = ++pBuf->pos;
-	pBuf->pos += labelSize;
+	//starts from the first char after the first label
+	uint8_t labelSize;
+	size_t origPos = pBuf->pos + 1;	//points to the first char after the first label
 	while(pBuf->buf[pBuf->pos] != 0 && pBuf->pos < pBuf->size)
 	{
 		labelSize = pBuf->buf[pBuf->pos];
-		//a serial of labels
-		if(labelSize > 0xc0)
+		//add +1 because the last char of the domain name must end with 0x00, which is extra of what is pointed by the labelSize
+		if(pBuf->pos + labelSize + 1 >= pBuf->size)
+		{
+			logError("domain name pBuf->pos(%ld) + labelSize(%d) exceed the pBuf->size(%ld).", pBuf->pos, labelSize, pBuf->size);
+			status = OS_ERROR_INVALID_VALUE;
+			goto EXIT;
+		}
+
+		 //0xc0 = the first 2 bits of a 16 bits field are 1, per rfc1035 section 4.1.4, it indicates the domain name is a pointer
+		if(labelSize >= 0xc0)
 	    {
         	uint16_t origUriPos = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff);
 			//copy the uri before this label, note the label has been replace with '.' in earlier iteration
-			memcpy(pUri, &pBuf->buf[origPos1], pBuf->pos-origPos1);
-			//copy the remaining uri since the offset label is used, per rfc1035, this must be the last label
-			strcpy(&pUri[pBuf->pos-origPos1], &pBuf->buf[origUriPos]);
+			if(pBuf->pos > origPos)
+			{
+				memcpy(pUri, &pBuf->buf[origPos], pBuf->pos-origPos);
+			}
+			//copy the remaining uri since the offset label is used, per rfc1035, this must be the last label.  note the earlier occurance of the domain name's label must have been replaced by '.' too
+			strcpy(&pUri[pBuf->pos-origPos], &pBuf->buf[origUriPos]);
 			pBuf->pos += 2;
         	goto EXIT;
     	}
 
 		if(labelSize > DNS_MAX_DOMAIN_NAME_LABEL_SIZE)
 		{
-			logError("a domain name label size (%d) is bigger than maximum allowed(%d).", labelSize, DNS_MAX_DOMAIN_NAME_LABEL_SIZE);
-			pBuf->pos = origPos;
+			logError("a domain name label size(0x%x) in pos(0x%lx) is bigger than maximum allowed(%d).", labelSize, pBuf->pos, DNS_MAX_DOMAIN_NAME_LABEL_SIZE);
+			pBuf->pos = origPos - 1;
 			status = OS_ERROR_INVALID_VALUE;
 			goto EXIT;
 		}
 		pBuf->buf[pBuf->pos] = '.';
-		pBuf->pos += labelSize;
+		pBuf->pos += labelSize + 1;
 	}
 
+	//combined with the previous while() check, the following check also implicitly verified the pBuf->buf[pBuf->pos] == 0
 	if(pBuf->pos >= pBuf->size)
 	{
         logError("the parsing of domain name crosses pBuf->size(%ld).", pBuf->size);
-		pBuf->pos = origPos;
+		pBuf->pos = origPos - 1;
         status = OS_ERROR_INVALID_VALUE;
         goto EXIT;
     }
 
-	if(pBuf->pos - origPos1 >= DNS_MAX_NAME_SIZE)
+	if(pBuf->pos - origPos >= DNS_MAX_NAME_SIZE)
 	{
 		logError("domain name size(%ld) is larger than DNS_MAX_NAME_SIZE(%d).", pBuf->pos - origPos, DNS_MAX_NAME_SIZE);
 		pBuf->pos = origPos;
@@ -750,12 +754,13 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 		goto EXIT;
 	}
 
-	//the URI in mBuf ends with 0
-	strcpy(pUri, &pBuf->buf[origPos1]);
+	//the URI in mBuf ends with 0, i.e., pBuf->buf[pBuf->pos] = 0
+	strcpy(pUri, &pBuf->buf[origPos]);
 
 	//point the pos to the first char after the uri, including the terminating 00
 	pBuf->pos++;
 
+debug("to-remove, domain name=%s", pUri);
 EXIT:
 	return status;
 }	
@@ -795,6 +800,8 @@ static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR)
     }
 
 	pRR->type = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+debug("to-remove, pBuf->pos=0x%x, type=%d", pBuf->pos, pRR->type);
+
     pBuf->pos += 2;
 	pRR->rrClass = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
@@ -813,7 +820,8 @@ static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR)
 				goto EXIT;
 			}
 
-			pRR->ipAddr.s_addr = htobe32(*(uint32_t*)&pBuf->buf[pBuf->pos]);
+			//no need to do htobe for network address
+			pRR->ipAddr.s_addr = *(uint32_t*)&pBuf->buf[pBuf->pos];	
 			pBuf->pos += 4;
 			break;
 		case DNS_QTYPE_SRV:
