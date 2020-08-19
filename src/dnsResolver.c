@@ -834,9 +834,7 @@ debug("to-remove, pBuf->pos=0x%x, type=%d", pBuf->pos, pRR->type);
             pBuf->pos += 2;
 
             //process target
-            pRR->srv.target.l = pBuf->buf[pBuf->pos++];
-            pRR->srv.target.p = &pBuf->buf[pBuf->pos];
-            pBuf->pos += pRR->srv.target.l;
+		    status = dnsParseDomainName(pBuf, pRR->srv.target);
 			break;
 		case DNS_QTYPE_NAPTR:
 			//based on rfc 2915

@@ -12,7 +12,8 @@
 
 static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsResResponse_t rr, void* pData);
 
-
+#define QUERY_A 0
+#define QUERY_SRV 1
 void dnsTest()
 {
     dnsServerConfig_t dnsServerConfig;
@@ -32,12 +33,22 @@ void dnsTest()
     //perform dns testing
 //    osVPointerLen_t qName = {{"ims.globalstar.com.mnc970.mcc310.gprs", strlen("ims.globalstar.com.mnc970.mcc310.gprs")}, false, false};
     osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
+#if QUERY_A
 	qName->pl.p ="example.com";
 	qName->pl.l = strlen("example.com");
 	qName->isPDynamic = false;
 	qName->isVPLDynamic = true;
     dnsMessage_t* pDnsMsg = NULL;
     osStatus_e status = dnsQuery(qName, DNS_QTYPE_A, true, &pDnsMsg, dnsTestCallback, NULL);
+#endif
+#if QUERY_SRV
+    qName->pl.p ="_sip._udp.sip.voice.google.com";
+    qName->pl.l = strlen("_sip._udp.sip.voice.google.com");
+    qName->isPDynamic = false;
+    qName->isVPLDynamic = true;
+    dnsMessage_t* pDnsMsg = NULL;
+    osStatus_e status = dnsQuery(qName, DNS_QTYPE_SRV, true, &pDnsMsg, dnsTestCallback, NULL);
+#endif
 	if(status != OS_STATUS_OK)
 	{
 		logError("fails to dnsQuery, status = %d.", status);
@@ -92,6 +103,48 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 			break;
 		}
 		case DNS_QTYPE_SRV:
+		{
+			for(int i=0; i<rr.pDnsMsg->hdr.anCount; i++)
+            {
+				debug("SRV, i=%d, type=%d, rrClase=%d, ttl=%d, priority=%d, weight=%d, port=%d, target=%s", i, rr.pDnsMsg->answer[i].type, rr.pDnsMsg->answer[i].rrClass, rr.pDnsMsg->answer[i].ttl, rr.pDnsMsg->answer[i].srv.priority, rr.pDnsMsg->answer[i].srv.weight, rr.pDnsMsg->answer[i].srv.port, rr.pDnsMsg->answer[i].srv.target);
+			}
+			for(int i=0; i<rr.pDnsMsg->hdr.anCount; i++)
+			{
+				int isAFound = false;
+				for(int j=0; j<rr.pDnsMsg->hdr.arCount; j++)
+				{
+					if(rr.pDnsMsg->addtlAnswer[j].type != DNS_QTYPE_A)
+					{
+						continue;
+					}
+
+					if(strcasecmp(rr.pDnsMsg->addtlAnswer[j].name, rr.pDnsMsg->answer[i].srv.target) == 0)
+					{
+						debug("A record, in addtlAnswer[%d], uri=%s", rr.pDnsMsg->addtlAnswer[j].name);
+						struct sockaddr_in rxSockAddr;
+						rxSockAddr.sin_addr = rr.pDnsMsg->addtlAnswer[j].ipAddr;
+						rxSockAddr.sin_port=0;
+						rxSockAddr.sin_family = AF_INET;
+						debug("i=%d, ttl=%d, ipAddr.sin_addr.s_addr=0x%x, ip=%A", i, rr.pDnsMsg->addtlAnswer[j].ttl, rr.pDnsMsg->addtlAnswer[j].ipAddr.s_addr, &rxSockAddr);
+						isAFound = true;
+						break;
+					}
+				}
+
+				if(!isAFound)
+				{
+				    osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
+    				qName->pl.p = rr.pDnsMsg->answer[i].srv.target;
+    				qName->pl.l = strlen(qName->pl.p);
+    				qName->isPDynamic = false;
+    				qName->isVPLDynamic = true;
+    				dnsMessage_t* pDnsMsg = NULL;
+
+					dnsQuery(qName, DNS_QTYPE_A, true, &pDnsMsg, dnsTestCallback, NULL);
+				}
+			} 
+			break;
+		}
 		case DNS_QTYPE_NAPTR:
 		default:
 			debug("query type=%d", rr.pDnsMsg->query.qType);

@@ -46,7 +46,7 @@
 #define DNS_MAX_SERVER_QUARANTINE_NO_RESPONSE_NUM	3
 
 #define DNS_MAX_MSG_SIZE	512
-#define DNS_MAX_NAME_SIZE    255
+#define DNS_MAX_NAME_SIZE    125		//max domain name size
 #define DNS_MAX_DOMAIN_NAME_LABEL_SIZE	63
 #define DNS_MAX_RR_NUM	5
 #define DNS_MAX_NAPTR_SERVICE_SIZE	64
@@ -100,7 +100,8 @@ typedef struct {
 	uint32_t priority;
 	uint32_t weight;
 	uint32_t port;
-	osPointerLen_t target;
+	char target[DNS_MAX_NAME_SIZE];
+//	osPointerLen_t target;
 } dnsSrv_t;
 
 
@@ -152,7 +153,7 @@ typedef struct dnsRR {
     +---------------------+
     |        Header       |
     +---------------------+
-    |       Question      | the question for the name server
+rr.pDnsMsg->answer[i].    |       Question      | the question for the name server
     +---------------------+
     |        Answer       | RRs answering the question
     +---------------------+
