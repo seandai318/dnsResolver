@@ -4,6 +4,7 @@
 #include "osSockAddr.h"
 #include "osMisc.h"
 #include "osPL.h"
+#include "osList.h"
 #include "osMemory.h"
 #include "osSockAddr.h"
 
@@ -86,55 +87,65 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 	{
 		case DNS_QTYPE_A:
 		{
+#if 0
 			osIpPort_t ipPort={{"93.184.216.34", strlen("93.184.216.34")}, 0};
 			struct sockaddr_in sockAddr;
 			osConvertPLton(&ipPort, false, &sockAddr);
 			debug("sockAddr.sin_addr.s_addr=0x%x for 93.184.216.34", sockAddr.sin_addr.s_addr);
-
+#endif
 			debug("DNS_QTYPE_A, anCount=%d", rr.pDnsMsg->hdr.anCount);
-			for(int i=0; i<rr.pDnsMsg->hdr.anCount; i++)
+			osListElement_t* pLE = rr.pDnsMsg->answerList.head;
+			int i=0;
+			while(pLE)
 			{
+				dnsRR_t* pDnsRR = pLE->data;
 				struct sockaddr_in rxSockAddr;
-				rxSockAddr.sin_addr = rr.pDnsMsg->answer[i].ipAddr;
+				rxSockAddr.sin_addr = pDnsRR->ipAddr;
 				rxSockAddr.sin_port=0;
 				rxSockAddr.sin_family = AF_INET;
-				debug("i=%d, ttl=%d, ipAddr.sin_addr.s_addr=0x%x, ip=%A", i, rr.pDnsMsg->answer[i].ttl, rr.pDnsMsg->answer[i].ipAddr.s_addr, &rxSockAddr);
+				debug("i=%d, ttl=%d, ipAddr.sin_addr.s_addr=0x%x, ip=%A", i++, pDnsRR->ttl, pDnsRR->ipAddr.s_addr, &rxSockAddr);
+				pLE = pLE->next;
 			}
 			break;
 		}
 		case DNS_QTYPE_SRV:
 		{
-			for(int i=0; i<rr.pDnsMsg->hdr.anCount; i++)
+			osListElement_t* pLE = rr.pDnsMsg->answerList.head;
+			int i=0;
+            while(pLE)
             {
-				debug("SRV, i=%d, type=%d, rrClase=%d, ttl=%d, priority=%d, weight=%d, port=%d, target=%s", i, rr.pDnsMsg->answer[i].type, rr.pDnsMsg->answer[i].rrClass, rr.pDnsMsg->answer[i].ttl, rr.pDnsMsg->answer[i].srv.priority, rr.pDnsMsg->answer[i].srv.weight, rr.pDnsMsg->answer[i].srv.port, rr.pDnsMsg->answer[i].srv.target);
-			}
-			for(int i=0; i<rr.pDnsMsg->hdr.anCount; i++)
-			{
 				int isAFound = false;
-				for(int j=0; j<rr.pDnsMsg->hdr.arCount; j++)
+				dnsRR_t* pDnsRR = pLE->data;
+				debug("SRV, i=%d, type=%d, rrClase=%d, ttl=%d, priority=%d, weight=%d, port=%d, target=%s", i++, pDnsRR->type, pDnsRR->rrClass, pDnsRR->ttl, pDnsRR->srv.priority, pDnsRR->srv.weight, pDnsRR->srv.port, pDnsRR->srv.target);
+
+				osListElement_t* pARLE = rr.pDnsMsg->addtlAnswerList.head;
+				int j=0;
+				while(pARLE)
 				{
-					if(rr.pDnsMsg->addtlAnswer[j].type != DNS_QTYPE_A)
+					dnsRR_t* pARDnsRR = pARLE->data;
+					if(pARDnsRR->type != DNS_QTYPE_A)
 					{
 						continue;
 					}
 
-					if(strcasecmp(rr.pDnsMsg->addtlAnswer[j].name, rr.pDnsMsg->answer[i].srv.target) == 0)
+					if(strcasecmp(pARDnsRR->name, pARDnsRR->srv.target) == 0)
 					{
-						debug("A record, in addtlAnswer[%d], uri=%s", rr.pDnsMsg->addtlAnswer[j].name);
+						debug("A record, in addtlAnswer[%d], uri=%s", j, pARDnsRR->name);
 						struct sockaddr_in rxSockAddr;
-						rxSockAddr.sin_addr = rr.pDnsMsg->addtlAnswer[j].ipAddr;
+						rxSockAddr.sin_addr = pARDnsRR->ipAddr;
 						rxSockAddr.sin_port=0;
 						rxSockAddr.sin_family = AF_INET;
-						debug("i=%d, ttl=%d, ipAddr.sin_addr.s_addr=0x%x, ip=%A", i, rr.pDnsMsg->addtlAnswer[j].ttl, rr.pDnsMsg->addtlAnswer[j].ipAddr.s_addr, &rxSockAddr);
+						debug("addtlAnswer[%d], ttl=%d, ipAddr.sin_addr.s_addr=0x%x, ip=%A", j, pARDnsRR->ttl, pARDnsRR->ipAddr.s_addr, &rxSockAddr);
 						isAFound = true;
 						break;
 					}
+					pARLE = pARLE->next;
 				}
 
 				if(!isAFound)
 				{
 				    osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
-    				qName->pl.p = rr.pDnsMsg->answer[i].srv.target;
+    				qName->pl.p = pDnsRR->srv.target;
     				qName->pl.l = strlen(qName->pl.p);
     				qName->isPDynamic = false;
     				qName->isVPLDynamic = true;
@@ -142,6 +153,8 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 
 					dnsQuery(qName, DNS_QTYPE_A, true, &pDnsMsg, dnsTestCallback, NULL);
 				}
+
+				pLE = pLE->next;
 			} 
 			break;
 		}

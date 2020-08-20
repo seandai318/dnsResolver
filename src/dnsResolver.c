@@ -81,16 +81,15 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf);
 static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode);
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri);
 static osStatus_e dnsParseQuestion(osMBuf_t* pBuf, dnsQuestion_t* pQuery);
-static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR);
+static dnsRR_t* dnsParseRR(osMBuf_t* pBuf);
 static void dns_onQCacheTimeout(uint64_t timerId, void* ptr);
 static void dns_onRRCacheTimeout(uint64_t timerId, void* ptr);
 static void dns_onServerQuarantineTimeout(uint64_t timerId, void* ptr);
 static dnsServerInfo_t* dnsGetServer();
 static uint16_t dnsCreateTrId();
-//static void dnsMessage_cleanup(void* data);
+static void dnsMessage_cleanup(void* data);
 static void dnsQCacheInfo_cleanup(void* data);
 static void dnsRRCacheInfo_cleanup(void* data);
-
 
 
 osStatus_e dnsResolverInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig)
@@ -526,10 +525,18 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 
 	pQCache->pServerInfo->noRspCount = 0;
 
-	//app does not want this RR to cache, or response set ttl=0 (use the first answer if there is more than one answer
-	if(!pQCache->isCacheRR || replyCode != DNS_RCODE_NO_ERROR || !pDnsMsg->answer[0].ttl)
+	//app does not want this RR to cache
+	if(!pQCache->isCacheRR || replyCode != DNS_RCODE_NO_ERROR )
 	{
 		logInfo("do not cache rr for qName(%r), qType=%d", &qName, pDnsMsg->query.qType);
+		goto EXIT;
+	}
+
+	//use the first answer if there is more than one answer
+	uint32_t ttl = ((dnsRR_t*)pDnsMsg->answerList.head->data)->ttl;
+	if(!ttl)
+	{
+		debug("ttl=0, do not cache");
 		goto EXIT;
 	}
 
@@ -538,7 +545,7 @@ debug("to-remove, replyCode=%d, replyCode != DNS_RCODE_NO_ERROR=%d", replyCode, 
 	pRRCache = osmalloc(sizeof(dnsRRCacheInfo_t), dnsRRCacheInfo_cleanup);
 
     //start the ttl timer
-    pRRCache->ttlTimerId = osStartTimer(pDnsMsg->answer[0].ttl, dns_onRRCacheTimeout, pRRCache);
+    pRRCache->ttlTimerId = osStartTimer(ttl, dns_onRRCacheTimeout, pRRCache);
     osHashData_t* pHashData = oszalloc(sizeof(osHashData_t), NULL);
     if(!pHashData)
     {
@@ -587,7 +594,7 @@ debug("to-remove, flags=0x%x", flags);
 		goto EXIT;
 	}
 
-	pDnsMsg = osmalloc(sizeof(dnsMessage_t), NULL);
+	pDnsMsg = oszalloc(sizeof(dnsMessage_t), dnsMessage_cleanup);
 	if(!pDnsMsg)
 	{
 		logError("fails to osmalloc for dnsMessage_t.");
@@ -608,30 +615,12 @@ debug("to-remove, flags=0x%x", flags);
 	//only parse the maximum DNS_MAX_RR_NUM records.
     pDnsMsg->hdr.anCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
-	if(pDnsMsg->hdr.anCount > DNS_MAX_RR_NUM)
-	{
-		logInfo("received pDnsMsg->hdr.anCount(%d) is more than DNS_MAX_RR_NUM(%d), only parse DNS_MAX_RR_NUM rr.", pDnsMsg->hdr.anCount, DNS_MAX_RR_NUM);
-        status = OS_ERROR_INVALID_VALUE;
-        goto EXIT;
-	}
 
     pDnsMsg->hdr.nsCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
-	if(pDnsMsg->hdr.nsCount > DNS_MAX_RR_NUM)
-	{
-        logInfo("received pDnsMsg->hdr.nsCount(%d) is more than DNS_MAX_RR_NUM(%d), only parse DNS_MAX_RR_NUM rr.", pDnsMsg->hdr.nsCount, DNS_MAX_RR_NUM);
-        status = OS_ERROR_INVALID_VALUE;
-        goto EXIT;
-	}
 
     pDnsMsg->hdr.arCount = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
-    if(pDnsMsg->hdr.arCount > DNS_MAX_RR_NUM)
-    {
-        logInfo("received pDnsMsg->hdr.arCount(%d) is more than DNS_MAX_RR_NUM(%d), only parse DNS_MAX_RR_NUM rr.", pDnsMsg->hdr.arCount, DNS_MAX_RR_NUM);
-        status = OS_ERROR_INVALID_VALUE;
-        goto EXIT;
-	}
 
 	status = dnsParseQuestion(pBuf, &pDnsMsg->query);
 	if(status != OS_STATUS_OK)
@@ -640,34 +629,41 @@ debug("to-remove, flags=0x%x", flags);
 		goto EXIT;
 	}
 
+	dnsRR_t* pRR = NULL;
 	for(int i=0; i<pDnsMsg->hdr.anCount; i++)
 	{
-		status = dnsParseRR(pBuf, &pDnsMsg->answer[i]);
-    	if(status != OS_STATUS_OK)
+		pRR = dnsParseRR(pBuf);
+    	if(!pRR)
     	{
         	logError("fails to dnsParseRR for pDnsMsg->answer[%d].", i);
         	goto EXIT;
     	}
+
+		osList_append(&pDnsMsg->answerList, pRR);
 	}
 
     for(int i=0; i<pDnsMsg->hdr.nsCount; i++)
     {
-        status = dnsParseRR(pBuf, &pDnsMsg->auth[i]);
-        if(status != OS_STATUS_OK)
+        pRR = dnsParseRR(pBuf);
+        if(!pRR)
         {
             logError("fails to dnsParseRR for pDnsMsg->auth[%d].", i);
             goto EXIT;
         }
+
+		osList_append(&pDnsMsg->authList, pRR);
     }
 
     for(int i=0; i<pDnsMsg->hdr.arCount; i++)
     {
-        status = dnsParseRR(pBuf, &pDnsMsg->addtlAnswer[i]);
-        if(status != OS_STATUS_OK)
+        pRR = dnsParseRR(pBuf);
+        if(!pRR)
         {
             logError("fails to dnsParseRR for pDnsMsg->addtlAnswer[%d].", i);
             goto EXIT;
         }
+
+		osList_append(&pDnsMsg->addtlAnswerList, pRR);
     }
 
 EXIT:
@@ -791,9 +787,18 @@ EXIT:
 }
 
 
-static osStatus_e dnsParseRR(osMBuf_t* pBuf, dnsRR_t* pRR)
+static dnsRR_t* dnsParseRR(osMBuf_t* pBuf)
 {
-	osStatus_e status = dnsParseDomainName(pBuf, pRR->name);
+	osStatus_e status = OS_STATUS_OK;
+	dnsRR_t* pRR = osmalloc(sizeof(dnsRR_t), NULL);
+	if(!pRR)
+	{
+		logError("fails to osmalloc pRR.");
+		status = OS_ERROR_MEMORY_ALLOC_FAILURE;
+		goto EXIT;
+	}
+
+	status = dnsParseDomainName(pBuf, pRR->name);
     if(status != OS_STATUS_OK)
     {
         goto EXIT;
@@ -900,7 +905,12 @@ debug("to-remove, pBuf->pos=0x%x, type=%d", pBuf->pos, pRR->type);
 	}
 
 EXIT:
-	return status;
+	if(status != OS_STATUS_OK)
+	{
+		pRR = osfree(pRR);
+	}
+
+	return pRR;
 }
 
 
@@ -1060,7 +1070,6 @@ static uint16_t dnsCreateTrId()
 }
 
 
-#if 0
 static void dnsMessage_cleanup(void* data)
 {
 	dnsMessage_t* pMsg = data;
@@ -1069,9 +1078,11 @@ static void dnsMessage_cleanup(void* data)
 		return;
 	}
 
-	osMBuf_dealloc(pMsg->pMBufRef);
+	osList_delete(&pMsg->answerList);
+	osList_delete(&pMsg->authList);
+	osList_delete(&pMsg->addtlAnswerList);
 }
-#endif
+
 
 static void dnsQCacheInfo_cleanup(void* data)
 {

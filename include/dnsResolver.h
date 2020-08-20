@@ -48,7 +48,6 @@
 #define DNS_MAX_MSG_SIZE	512
 #define DNS_MAX_NAME_SIZE    125		//max domain name size
 #define DNS_MAX_DOMAIN_NAME_LABEL_SIZE	63
-#define DNS_MAX_RR_NUM	5
 #define DNS_MAX_NAPTR_SERVICE_SIZE	64
 
 typedef enum {
@@ -101,7 +100,6 @@ typedef struct {
 	uint32_t weight;
 	uint32_t port;
 	char target[DNS_MAX_NAME_SIZE];
-//	osPointerLen_t target;
 } dnsSrv_t;
 
 
@@ -144,7 +142,6 @@ typedef struct dnsRR {
 		dnsNaptr_t naptr;
 		osPointerLen_t other;
 	};
-	void* rData;
 } dnsRR_t;
 
 
@@ -165,9 +162,9 @@ rr.pDnsMsg->answer[i].    |       Question      | the question for the name serv
 typedef struct dnsMessage {
 	dnsHdr_t hdr;
 	dnsQuestion_t query;
-	dnsRR_t answer[DNS_MAX_RR_NUM];
-	dnsRR_t auth[DNS_MAX_RR_NUM];
-	dnsRR_t addtlAnswer[DNS_MAX_RR_NUM];	
+	osList_t answerList;		//dnsRR_t, list of answer rr
+	osList_t authList;			//dnsRR_t, list of auth rr
+	osList_t addtlAnswerList;	//dnsRR_t, list of additional answer rr
 } dnsMessage_t;
 
 
