@@ -11,11 +11,14 @@
 #include "dnsResolverIntf.h"
 
 
-static void printOutcome(dnsMessage_t* pDnsRsp);
+static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA);
 static void dnsTestCallback(dnsResResponse_t* pRR, void* pData);
 
 #define QUERY_A 0
 #define QUERY_SRV 1
+
+bool isResolveAll = true;
+
 void dnsTest()
 {
     dnsServerConfig_t dnsServerConfig;
@@ -28,7 +31,7 @@ void dnsTest()
     dnsServerConfig.dnsServer[0].ipPort.ip.isPDynamic = false;
     dnsServerConfig.dnsServer[0].priority = 10;
 
-    dnsResolverInit(64, 64, &dnsServerConfig);
+    dnsInit(64, 64, &dnsServerConfig);
 
 	debug("dnsResolver is initialized");
 
@@ -41,7 +44,7 @@ void dnsTest()
 	qName->pl.l = strlen("example.com");
 	qName->isPDynamic = false;
 	qName->isVPLDynamic = true;
-    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, false, true, &pDnsRR, dnsTestCallback, NULL);
+    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_SRV
     qName->pl.p ="_sip._udp.sip.voice.google.com";
@@ -49,7 +52,7 @@ void dnsTest()
     qName->isPDynamic = false;
     qName->isVPLDynamic = true;
     dnsMessage_t* pDnsMsg = NULL;
-    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_SRV, false, true, &pDnsRR, dnsTestCallback, NULL);
+    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_SRV, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 
 	switch(qStatus)
@@ -114,7 +117,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 				return;
 			}
 
-			printOutcome(pRR->pDnsRsp);
+			printOutcome(pRR->pDnsRsp, true);
 			break;
 		}
 		case DNS_RR_DATA_TYPE_MSGLIST:
@@ -133,7 +136,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
             	    return;
             	}
 
-				printOutcome(pDnsRsp);
+				printOutcome(pDnsRsp, false);
 				pRRLE = pRRLE->next;
 			}
 			break;
@@ -144,7 +147,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 }
 
 
-static void printOutcome(dnsMessage_t* pDnsRsp)
+static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA)
 {
 	switch(pDnsRsp->query.qType)
 	{
@@ -180,6 +183,12 @@ static void printOutcome(dnsMessage_t* pDnsRsp)
 				int isAFound = false;
 				dnsRR_t* pDnsRR = pLE->data;
 				debug("SRV, i=%d, type=%d, rrClase=%d, ttl=%d, priority=%d, weight=%d, port=%d, target=%s", i++, pDnsRR->type, pDnsRR->rrClass, pDnsRR->ttl, pDnsRR->srv.priority, pDnsRR->srv.weight, pDnsRR->srv.port, pDnsRR->srv.target);
+				
+				if(!isUntilA)
+				{				
+	                pLE = pLE->next;
+					continue;
+				}
 
 				osListElement_t* pARLE = pDnsRsp->addtlAnswerList.head;
 				int j=0;

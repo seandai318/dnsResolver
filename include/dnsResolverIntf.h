@@ -208,7 +208,7 @@ typedef struct {
 typedef void (*dnsResolver_callback_h)(dnsResResponse_t* pRR, void* pData);
 
 
-osStatus_e dnsResolverInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig);
+osStatus_e dnsInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig);
 dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResolveAll, bool isCacheRR, dnsResResponse_t** ppResResponse, dnsResolver_callback_h rrCallback, void* pData);
 
 	

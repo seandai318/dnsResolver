@@ -32,7 +32,7 @@ static dnsServerSelInfo_t serverSelInfo;
 static __thread uint16_t dnsTrId;
 
 static osStatus_e dnsHashLookup(osHash_t* pHash, osPointerLen_t* qName, dnsQType_e qType, void** pHashData);
-static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg);
+static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg);
 static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
 static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf);
@@ -149,6 +149,7 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 	*qResponse = NULL;
 	*ppQCache = NULL;
 
+	debug("qName=%r, qType=%d, isCacheRR=%d", &qName->pl, qType, isCacheRR);
 	if(isCacheRR)
 	{
 		//check if there is cached response
@@ -214,7 +215,7 @@ static osStatus_e dnsHashLookup(osHash_t* pHash, osPointerLen_t* qName, dnsQType
 }
 	
 
-static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg)
+static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg)
 {
 	osStatus_e status = OS_STATUS_OK;
     dnsQCacheInfo_t* pQCache = NULL;
@@ -452,6 +453,8 @@ EXIT:
 
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 {
+	DEBUG_BEGIN
+
 	osStatus_e status = OS_STATUS_OK;
 	dnsRcode_e replyCode = 0;
 	dnsMessage_t* pDnsMsg = NULL;
@@ -482,11 +485,12 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 	}
 
 	osPointerLen_t qName = {pDnsMsg->query.qName, strlen(pDnsMsg->query.qName)};
-	pQCache = dnsRRNotifyApp(&qName, pDnsMsg->query.qType, DNS_RES_STATUS_OK, pDnsMsg);
+    debug("query response, qName=%r, qType=%d, replyCode=%d", &qName, pDnsMsg->query.qType, replyCode);
+	pQCache = dnsRRMatchQCacheAndNotifyApp(&qName, pDnsMsg->query.qType, DNS_RES_STATUS_OK, pDnsMsg);
 
 	if(!pQCache)
 	{
-		logError("dnsRRNotifyApp returns null pQCache, unexpected.");
+		logError("dnsRRMatchQCacheAndNotifyApp returns null pQCache, unexpected.");
 		goto EXIT;
 	}
 
@@ -507,12 +511,10 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 		goto EXIT;
 	}
 
-debug("to-remove, replyCode=%d, replyCode != DNS_RCODE_NO_ERROR=%d", replyCode, replyCode != DNS_RCODE_NO_ERROR);
+	debug("qName=%r, ttl=%d(sec)", &qName, ttl);
 	//cache the response in the rrCache, create a rrCache data structure
-	pRRCache = osmalloc(sizeof(dnsRRCacheInfo_t), dnsRRCacheInfo_cleanup);
-
-    //start the ttl timer
-    pRRCache->ttlTimerId = osStartTimer(ttl, dns_onRRCacheTimeout, pRRCache);
+	pRRCache = oszalloc(sizeof(dnsRRCacheInfo_t), dnsRRCacheInfo_cleanup);
+	pRRCache->pDnsMsg = osmemref(pDnsMsg);
     osHashData_t* pHashData = oszalloc(sizeof(osHashData_t), NULL);
     if(!pHashData)
     {
@@ -527,7 +529,7 @@ debug("to-remove, replyCode=%d, replyCode != DNS_RCODE_NO_ERROR=%d", replyCode, 
     pRRCache->pHashElement = osHash_add(rrCache, pHashData);
 
     //start the ttl timer
-    pRRCache->ttlTimerId = osStartTimer(DNS_WAIT_RESPONSE_TIMEOUT, dns_onRRCacheTimeout, pRRCache);
+    pRRCache->ttlTimerId = osStartTimer(ttl*1000, dns_onRRCacheTimeout, pRRCache);
 EXIT:
 	osfree(pQCache);
 	osMBuf_dealloc(pBuf);
@@ -536,6 +538,7 @@ EXIT:
 		osfree(pRRCache);
 	}
 
+	DEBUG_END
 	return;
 }
 
@@ -549,7 +552,6 @@ static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode)
 	uint16_t trId = htobe16(*(uint16_t*)pBuf->buf);
 	pBuf->pos += 2;
 	uint16_t flags = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
-debug("to-remove, flags=0x%x", flags);
 	pBuf->pos += 2;
 	*replyCode = flags & DNS_RCODE_MASK;
 	if(*replyCode == DNS_RCODE_FORMAT_ERROR)
@@ -721,7 +723,8 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 	//point the pos to the first char after the uri, including the terminating 00
 	pBuf->pos++;
 
-debug("to-remove, domain name=%s", pUri);
+	debug("domain name=%s", pUri);
+
 EXIT:
 	return status;
 }	
@@ -770,8 +773,6 @@ static dnsRR_t* dnsParseRR(osMBuf_t* pBuf)
     }
 
 	pRR->type = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
-debug("to-remove, pBuf->pos=0x%x, type=%d", pBuf->pos, pRR->type);
-
     pBuf->pos += 2;
 	pRR->rrClass = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
@@ -937,7 +938,7 @@ static void dns_onQCacheTimeout(uint64_t timerId, void* ptr)
 
 EXIT:
 	//notify all Query listeners
-	dnsRRNotifyApp(&pQCache->qName->pl, pQCache->qType, DNS_RES_ERROR_NO_RESPONSE, NULL);
+	dnsRRMatchQCacheAndNotifyApp(&pQCache->qName->pl, pQCache->qType, DNS_RES_ERROR_NO_RESPONSE, NULL);
 
     osfree(pQCache);
 }
@@ -972,7 +973,7 @@ static void dns_onRRCacheTimeout(uint64_t timerId, void* ptr)
 	dnsRRCacheInfo_t* pRRCache = ptr;
 	if(pRRCache->ttlTimerId != timerId)
 	{
-		logError("pRRCache->ttlTimerId(%d) does not match with timerId(%d), unexpected.", pRRCache->ttlTimerId, timerId);
+		logError("pRRCache->ttlTimerId(0x%lx) does not match with timerId(0x%lx), unexpected.", pRRCache->ttlTimerId, timerId);
 		return;
 	}
 	pRRCache->ttlTimerId = 0;

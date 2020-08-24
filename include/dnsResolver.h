@@ -51,6 +51,7 @@ typedef struct {
 } dnsServerSelInfo_t;
 
 
+osStatus_e dnsResolverInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig);
 dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData);
 
 
