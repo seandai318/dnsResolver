@@ -38,7 +38,7 @@ dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResol
 	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_DONE;
 	dnsMessage_t* pDnsRspMsg = NULL;
 
-	if(!qName || ppResResponse)
+	if(!qName || !ppResResponse)
 	{
 		logError("null pointer, qName=%p, ppResResponse=%p", qName, ppResResponse);
 		qStatus = DNS_QUERY_STATUS_FAIL;

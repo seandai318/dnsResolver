@@ -136,7 +136,7 @@ EXIT:
 dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData)
 {
 	DEBUG_BEGIN
-	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_DONE;
+	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_ONGOING;
 	osStatus_e status = OS_STATUS_OK;
 
 	if(!qName || !qResponse || !rrCallback || !ppQCache)
@@ -162,6 +162,7 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 		if(*qResponse)
 		{
 			logInfo("find a cached DNS query response for qName(%r), qType(%d).", &qName->pl, qType);
+			qStatus = DNS_QUERY_STATUS_DONE;
 			goto EXIT;
 		}
 	}
@@ -170,7 +171,6 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 	if(dnsIsQueryOngoing(&qName->pl, qType, isCacheRR, rrCallback, pData, ppQCache))
 	{
 		logInfo("there is a query ongoing for qName(%r), qType(%d).", &qName->pl, qType);
-		qStatus = DNS_QUERY_STATUS_ONGOING;
 		goto EXIT;
 	}
 

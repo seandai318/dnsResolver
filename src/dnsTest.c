@@ -41,7 +41,6 @@ void dnsTest()
 	qName->pl.l = strlen("example.com");
 	qName->isPDynamic = false;
 	qName->isVPLDynamic = true;
-    //dnsMessage_t* pDnsMsg = NULL;
     dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, false, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_SRV
@@ -56,6 +55,8 @@ void dnsTest()
 	switch(qStatus)
 	{
 		case DNS_QUERY_STATUS_ONGOING:
+			debug("dnsQuery(%r) is ongoing", qName);
+			break;
 		case DNS_QUERY_STATUS_DONE:
 			debug("dnsQuery(%r) is done.", qName);
 			if(pDnsRR->rrType == DNS_RR_DATA_TYPE_STATUS)
@@ -105,7 +106,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 		{
 			debug("query response is DNS_RR_DATA_TYPE_MSG");
 
-			debug("qName=%r, qType=%d, pData=%p", pRR->pDnsRsp->query.qName, pRR->pDnsRsp->query.qType, pData);
+			debug("qName=%s, qType=%d, pData=%p", pRR->pDnsRsp->query.qName, pRR->pDnsRsp->query.qType, pData);
 
 			if(pRR->pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
 			{
@@ -124,7 +125,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 			while(pRRLE)
 			{
 				dnsMessage_t* pDnsRsp = pRRLE->data;
-	            debug("qName=%r, qType=%d, pData=%p", pDnsRsp->query.qName, pDnsRsp->query.qType, pData);
+	            debug("qName=%s, qType=%d, pData=%p", pDnsRsp->query.qName, pDnsRsp->query.qType, pData);
 
 	            if(pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
     	        {
@@ -217,6 +218,8 @@ static void printOutcome(dnsMessage_t* pDnsRsp)
 				    switch(qStatus)
     				{
         				case DNS_QUERY_STATUS_ONGOING:
+				            debug("dnsQuery(%r) is ongoing", qName);
+            				break;
         				case DNS_QUERY_STATUS_DONE:
             				debug("dnsQuery(%r) is done.", qName);
             				if(pDnsRR->rrType == DNS_RR_DATA_TYPE_STATUS)
