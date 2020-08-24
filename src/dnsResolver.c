@@ -15,56 +15,14 @@
 #include "osMemory.h"
 #include "osMBuf.h"
 #include "osPL.h"
-#include "dnsResolver.h"
 #include "osDebug.h"
 #include "osMisc.h"
 #include "osTimer.h"
 
 #include "transportIntf.h"
 
-
-typedef struct {
-    dnsResover_callback_h rrCallback;
-    void* pAppData;
-} dnsQAppInfo_t;
-
-
-typedef struct {
-    struct sockaddr_in socketAddr;
-    uint8_t priority;
-    uint8_t noRspCount;     //the continuous query no response count, the count will be reset to 0 any time got a response. e.g., if query A, B, C, D, A no response, count=1, B no response, count=2, C response, count=0, D no response, count=1, etc.
-    uint64_t quarantineTimerId; //!=0 when the server is quarantined
-} dnsServerInfo_t;
-
-
-typedef struct {
-	osVPointerLen_t* qName;
-	dnsQType_e qType;
-	bool isCacheRR;
-	uint16_t qTrId;
-	uint8_t serverQueried;		//how many servers has this query used due to earlier query failure
-	osMBuf_t* pBuf;				//query mBuf
-	dnsServerInfo_t* pServerInfo;
-	uint64_t waitForRespTimerId;
-	osList_t appDataList;		//each element contains dnsQAppInfo_t, list of app Data received when app requesting dns service, need to pass back in rrCallback. one element per request
-	osListElement_t* pHashElement;	//points to the qCache element stores this node
-} dnsQCacheInfo_t;
-
-
-typedef struct {
-	dnsMessage_t* pDnsMsg;
-	uint64_t ttlTimerId;
-	osListElement_t* pHashElement;
-} dnsRRCacheInfo_t;
-
-
-typedef struct {
-    osNodeSelMode_e serverSelMode;
-    dnsServerInfo_t serverInfo[DNS_MAX_SERVER_NUM];
-    int serverNum;
-    uint64_t curNodeSelIdx;     //only applicable if serverSelMode=OS_NODE_SELECT_MODE_ROUND_ROBIN
-} dnsServerSelInfo_t;
-
+#include "dnsResolver.h"
+#include "dnsResolverIntf.h"
 
 
 static __thread osHash_t* rrCache;	//cached rr records
@@ -75,8 +33,8 @@ static __thread uint16_t dnsTrId;
 
 static osStatus_e dnsHashLookup(osHash_t* pHash, osPointerLen_t* qName, dnsQType_e qType, void** pHashData);
 static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg);
-static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData);
-static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData);
+static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
+static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf);
 static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode);
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri);
@@ -175,19 +133,21 @@ EXIT:
 
 /* if isCacheRR == true, caller indicates cache the RR if possible, otherwise, the resolver would not cache the rr.  The resolver also uses this flag to check if it needs to check the rrCache first before performing dns query.  It is expected that user may not want to set this flag to true for NSAPR u query (enum query) as each call may require a enum query and the same E164 number may not re-occur for long time, it will be waste of resources to store its rr
 */
-osStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsResover_callback_h rrCallback, void* pData)
+dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData)
 {
 	DEBUG_BEGIN
+	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_DONE;
 	osStatus_e status = OS_STATUS_OK;
 
-	if(!qName || !qResponse || !rrCallback)
+	if(!qName || !qResponse || !rrCallback || !ppQCache)
 	{
-		logError("null pointer, qName=%p, qResponse=%p, rrCallback=%p.", qName, qResponse, rrCallback);
+		logError("null pointer, qName=%p, qResponse=%p, rrCallback=%p, ppQCache=%p.", qName, qResponse, rrCallback, ppQCache);
 		status = OS_ERROR_NULL_POINTER;
 		goto EXIT;
 	}
 
 	*qResponse = NULL;
+	*ppQCache = NULL;
 
 	if(isCacheRR)
 	{
@@ -207,18 +167,23 @@ osStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dn
 	}
  	
 	//check if a query is ongoing for the same qName
-	if(dnsIsQueryOngoing(&qName->pl, qType, isCacheRR, rrCallback, pData))
+	if(dnsIsQueryOngoing(&qName->pl, qType, isCacheRR, rrCallback, pData, ppQCache))
 	{
 		logInfo("there is a query ongoing for qName(%r), qType(%d).", &qName->pl, qType);
+		qStatus = DNS_QUERY_STATUS_ONGOING;
 		goto EXIT;
 	}
 
 	//do not find a cached query response, neither there is a ongoing query, perform a brand new query		
-	status = dnsPerformQuery(qName, qType, isCacheRR, rrCallback, pData);
+	status = dnsPerformQuery(qName, qType, isCacheRR, rrCallback, pData, ppQCache);
 
 EXIT:
+	if(status != OS_STATUS_OK)
+	{
+		qStatus = DNS_QUERY_STATUS_FAIL;
+	}
 	DEBUG_END
-	return status;
+	return qStatus;
 }	
 
 
@@ -272,15 +237,15 @@ static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, 
     //remove from hash.  Intentionally put before the notifying of pDnsMsg to app to allow app to add the same entry (may not be necessary though)
     osHash_deleteNode(pQCache->pHashElement, OS_HASH_DEL_NODE_TYPE_KEEP_USER_DATA);
 
-	dnsResResponse_t rr;
+	dnsResResponse_t rr = {};
 	if(rrStatus == DNS_RES_STATUS_OK)
 	{
-		rr.isStatus = false;
-		rr.pDnsMsg = pDnsMsg;
+		rr.rrType = DNS_RR_DATA_TYPE_MSG;
+		rr.pDnsRsp = pDnsMsg;
 	}
 	else
 	{
-        rr.isStatus = true;
+        rr.rrType = DNS_RR_DATA_TYPE_STATUS;
         rr.status = rrStatus;
     }
 
@@ -289,7 +254,7 @@ static dnsQCacheInfo_t* dnsRRNotifyApp(osPointerLen_t* qName, dnsQType_e qType, 
     while(pLE)
     {
         dnsQAppInfo_t* pApp = pLE->data;
-        pApp->rrCallback(qName, qType, rr, pApp->pAppData);
+        pApp->rrCallback(&rr, pApp->pAppData);
         pLE = pLE->next;
     }
 
@@ -303,7 +268,7 @@ EXIT:
 }
 
 
-static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData)
+static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache)
 {
 	osStatus_e status = OS_STATUS_OK;
 	bool isQOngoing = false;
@@ -352,11 +317,12 @@ static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCa
     isQOngoing = true;
 
 EXIT:
+	*ppQCache = pQuery;
 	return isQOngoing;
 }
 
 
-static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResover_callback_h rrCallback, void* pData)
+static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache)
 {
 	osStatus_e status = OS_STATUS_OK;
 
@@ -476,9 +442,10 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 EXIT:
 	if(status != OS_STATUS_OK)
 	{
-		osfree(pQCache);
+		pQCache = osfree(pQCache);
 	}
 
+	*ppQCache = pQCache;
 	return status;
 }
 
@@ -564,8 +531,6 @@ debug("to-remove, replyCode=%d, replyCode != DNS_RCODE_NO_ERROR=%d", replyCode, 
 EXIT:
 	osfree(pQCache);
 	osMBuf_dealloc(pBuf);
-	//there was consideration to let app to free pDnsMsg.  But realize there may have multiple requests for a pDnsMsg, to make thing easier just let this function to free pDnsMsg.  if app wants to keep pDnsMsg, it has to save by itself.  With this approach, the pDnsMsg also does not need to refer the raw DNS response (osMBuf_t) in its deata structure for query typyes like NAPTR (it has osPointerLen_t parameters that points to bytes in osMBuf. 
-	osfree(pDnsMsg);
 	if(status != OS_STATUS_OK)
 	{
 		osfree(pRRCache);
@@ -892,9 +857,11 @@ debug("to-remove, pBuf->pos=0x%x, type=%d", pBuf->pos, pRR->type);
             pBuf->pos += pRR->naptr.regexp.l;
 
             //process replacement
-            pRR->naptr.replacement.l = pBuf->buf[pBuf->pos++];
-            pRR->naptr.replacement.p = &pBuf->buf[pBuf->pos];
-            pBuf->pos += pRR->naptr.replacement.l;
+		    status = dnsParseDomainName(pBuf, pRR->naptr.replacement);
+    		if(status != OS_STATUS_OK)
+    		{
+        		goto EXIT;
+    		}
 			break;
 		default:
 			logInfo("pRR->type=%d is unhandled.", pRR->type);
@@ -970,7 +937,7 @@ static void dns_onQCacheTimeout(uint64_t timerId, void* ptr)
 
 EXIT:
 	//notify all Query listeners
-	dnsRRNotifyApp(&pQCache->qName->pl, pQCache->qType, DNS_RES_STATUS_NO_RESPONSE, NULL);
+	dnsRRNotifyApp(&pQCache->qName->pl, pQCache->qType, DNS_RES_ERROR_NO_RESPONSE, NULL);
 
     osfree(pQCache);
 }

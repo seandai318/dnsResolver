@@ -8,10 +8,11 @@
 #include "osMemory.h"
 #include "osSockAddr.h"
 
-#include "dnsResolver.h"
+#include "dnsResolverIntf.h"
 
 
-static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsResResponse_t rr, void* pData);
+static void printOutcome(dnsMessage_t* pDnsRsp);
+static void dnsTestCallback(dnsResResponse_t* pRR, void* pData);
 
 #define QUERY_A 0
 #define QUERY_SRV 1
@@ -34,13 +35,14 @@ void dnsTest()
     //perform dns testing
 //    osVPointerLen_t qName = {{"ims.globalstar.com.mnc970.mcc310.gprs", strlen("ims.globalstar.com.mnc970.mcc310.gprs")}, false, false};
     osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
+	dnsResResponse_t* pDnsRR = NULL;
 #if QUERY_A
 	qName->pl.p ="example.com";
 	qName->pl.l = strlen("example.com");
 	qName->isPDynamic = false;
 	qName->isVPLDynamic = true;
-    dnsMessage_t* pDnsMsg = NULL;
-    osStatus_e status = dnsQuery(qName, DNS_QTYPE_A, true, &pDnsMsg, dnsTestCallback, NULL);
+    //dnsMessage_t* pDnsMsg = NULL;
+    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, false, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_SRV
     qName->pl.p ="_sip._udp.sip.voice.google.com";
@@ -48,18 +50,37 @@ void dnsTest()
     qName->isPDynamic = false;
     qName->isVPLDynamic = true;
     dnsMessage_t* pDnsMsg = NULL;
-    osStatus_e status = dnsQuery(qName, DNS_QTYPE_SRV, true, &pDnsMsg, dnsTestCallback, NULL);
+    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_SRV, false, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
-	if(status != OS_STATUS_OK)
-	{
-		logError("fails to dnsQuery, status = %d.", status);
-		goto EXIT;
-	}
 
-	if(pDnsMsg)
+	switch(qStatus)
 	{
-		logInfo("received pDnsMsg.");
-		goto EXIT;
+		case DNS_QUERY_STATUS_ONGOING:
+		case DNS_QUERY_STATUS_DONE:
+			debug("dnsQuery(%r) is done.", qName);
+			if(pDnsRR->rrType == DNS_RR_DATA_TYPE_STATUS)
+			{
+				debug("rr status = %d", pDnsRR->status);
+			}
+			else if(pDnsRR->rrType == DNS_RR_DATA_TYPE_MSG)
+			{
+				debug("qName=%s, qType=%d, query done.", pDnsRR->pDnsRsp->query.qName, pDnsRR->pDnsRsp->query.qType);
+			}
+			else
+			{
+				osListElement_t* pLE = pDnsRR->dnsRspList.head;
+				while(pLE)
+				{
+					dnsMessage_t* pDnsMsg = pLE->data;
+					debug("qName=%s, qType=%d, query done.", pDnsMsg->query.qName, pDnsMsg->query.qType);
+					pLE = pLE->next;
+				}
+			}
+			break;
+		case DNS_QUERY_STATUS_FAIL:
+			logError("fails to dnsQuery, qName=%r, status = %d.", qName, qStatus);
+			goto EXIT;
+			break;
 	}
 
 EXIT:
@@ -67,23 +88,64 @@ EXIT:
 };
 
 
-static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsResResponse_t rr, void* pData)
+static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 {
-	debug("qName=%r, qType=%d, pData=%p", qName, qType, pData);
-	debug("rr.isStatus=%d, rr.status=%d, rr.dnsMsg=%p", rr.isStatus, rr.status, rr.pDnsMsg);
-	if(rr.isStatus)
+	if(!pRR)
 	{
-		debug("query error status = %d", rr.status);
+		logError("null pointer, pRR");
 		return;
 	}
 
-	if(rr.pDnsMsg->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
+	switch(pRR->rrType)
 	{
-		debug("query response error=%d", rr.pDnsMsg->hdr.flags & DNS_RCODE_MASK);
-		return;
+		case DNS_RR_DATA_TYPE_STATUS:
+			debug("query response is status, status=%d", pRR->status);
+			break;
+    	case DNS_RR_DATA_TYPE_MSG:
+		{
+			debug("query response is DNS_RR_DATA_TYPE_MSG");
+
+			debug("qName=%r, qType=%d, pData=%p", pRR->pDnsRsp->query.qName, pRR->pDnsRsp->query.qType, pData);
+
+			if(pRR->pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
+			{
+				debug("query response error=%d", pRR->pDnsRsp->hdr.flags & DNS_RCODE_MASK);
+				return;
+			}
+
+			printOutcome(pRR->pDnsRsp);
+			break;
+		}
+		case DNS_RR_DATA_TYPE_MSGLIST:
+		{
+            debug("query response is DNS_RR_DATA_TYPE_MSGLIST");
+
+			osListElement_t* pRRLE = pRR->dnsRspList.head;
+			while(pRRLE)
+			{
+				dnsMessage_t* pDnsRsp = pRRLE->data;
+	            debug("qName=%r, qType=%d, pData=%p", pDnsRsp->query.qName, pDnsRsp->query.qType, pData);
+
+	            if(pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
+    	        {
+        	        debug("query response error=%d", pDnsRsp->hdr.flags & DNS_RCODE_MASK);
+            	    return;
+            	}
+
+				printOutcome(pDnsRsp);
+				pRRLE = pRRLE->next;
+			}
+			break;
+		}
 	}
 
-	switch(rr.pDnsMsg->query.qType)
+	return;
+}
+
+
+static void printOutcome(dnsMessage_t* pDnsRsp)
+{
+	switch(pDnsRsp->query.qType)
 	{
 		case DNS_QTYPE_A:
 		{
@@ -93,8 +155,8 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 			osConvertPLton(&ipPort, false, &sockAddr);
 			debug("sockAddr.sin_addr.s_addr=0x%x for 93.184.216.34", sockAddr.sin_addr.s_addr);
 #endif
-			debug("DNS_QTYPE_A, anCount=%d", rr.pDnsMsg->hdr.anCount);
-			osListElement_t* pLE = rr.pDnsMsg->answerList.head;
+			debug("DNS_QTYPE_A, anCount=%d", pDnsRsp->hdr.anCount);
+			osListElement_t* pLE = pDnsRsp->answerList.head;
 			int i=0;
 			while(pLE)
 			{
@@ -110,15 +172,15 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 		}
 		case DNS_QTYPE_SRV:
 		{
-			osListElement_t* pLE = rr.pDnsMsg->answerList.head;
+			osListElement_t* pLE = pDnsRsp->answerList.head;
 			int i=0;
-            while(pLE)
-            {
+          	while(pLE)
+          	{
 				int isAFound = false;
 				dnsRR_t* pDnsRR = pLE->data;
 				debug("SRV, i=%d, type=%d, rrClase=%d, ttl=%d, priority=%d, weight=%d, port=%d, target=%s", i++, pDnsRR->type, pDnsRR->rrClass, pDnsRR->ttl, pDnsRR->srv.priority, pDnsRR->srv.weight, pDnsRR->srv.port, pDnsRR->srv.target);
 
-				osListElement_t* pARLE = rr.pDnsMsg->addtlAnswerList.head;
+				osListElement_t* pARLE = pDnsRsp->addtlAnswerList.head;
 				int j=0;
 				while(pARLE)
 				{
@@ -144,14 +206,43 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 
 				if(!isAFound)
 				{
-				    osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
+					osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
     				qName->pl.p = pDnsRR->srv.target;
     				qName->pl.l = strlen(qName->pl.p);
     				qName->isPDynamic = false;
     				qName->isVPLDynamic = true;
-    				dnsMessage_t* pDnsMsg = NULL;
+					dnsResResponse_t* pDnsRR;
+					dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, false, true, &pDnsRR, dnsTestCallback, NULL);
 
-					dnsQuery(qName, DNS_QTYPE_A, true, &pDnsMsg, dnsTestCallback, NULL);
+				    switch(qStatus)
+    				{
+        				case DNS_QUERY_STATUS_ONGOING:
+        				case DNS_QUERY_STATUS_DONE:
+            				debug("dnsQuery(%r) is done.", qName);
+            				if(pDnsRR->rrType == DNS_RR_DATA_TYPE_STATUS)
+            				{
+                				debug("rr status = %d", pDnsRR->status);
+            				}
+            				else if(pDnsRR->rrType == DNS_RR_DATA_TYPE_MSG)
+            				{
+                				debug("qName=%s, qType=%d, query done.", pDnsRR->pDnsRsp->query.qName, pDnsRR->pDnsRsp->query.qType);
+            				}
+            				else
+            				{
+                				osListElement_t* pLE = pDnsRR->dnsRspList.head;
+                				while(pLE)
+                				{
+                    				dnsMessage_t* pDnsMsg = pLE->data;
+                    				debug("qName=%s, qType=%d, query done.", pDnsMsg->query.qName, pDnsMsg->query.qType);
+                    				pLE = pLE->next;
+                				}
+            				}
+            				break;
+        				case DNS_QUERY_STATUS_FAIL:
+            				logError("fails to dnsQuery, qName=%r, status = %d.", qName, qStatus);
+            				return;
+            				break;
+    				}
 				}
 
 				pLE = pLE->next;
@@ -160,8 +251,7 @@ static void dnsTestCallback(osPointerLen_t* qName, dnsQType_e qType, const dnsRe
 		}
 		case DNS_QTYPE_NAPTR:
 		default:
-			debug("query type=%d", rr.pDnsMsg->query.qType);
+			debug("query type=%d", pDnsRsp->query.qType);
 			break;
-	}				
+	}					
 }
-
