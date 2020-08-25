@@ -18,13 +18,13 @@ static void startTest();
 static void dnsTest_onTimeout(uint64_t timerId, void* ptr);
 
 
-#define QUERY_A 1
-#define QUERY_SRV 0
+#define QUERY_A 0
+#define QUERY_SRV 1
 
 dnsServerConfig_t dnsServerConfig;
 
 
-bool isResolveAll = true;
+bool isResolveAll = false;
 
 void dnsTest()
 {
@@ -148,7 +148,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 				return;
 			}
 
-			printOutcome(pRR->pDnsRsp, true);
+			printOutcome(pRR->pDnsRsp, isResolveAll);
 			break;
 		}
 		case DNS_RR_DATA_TYPE_MSGLIST:
