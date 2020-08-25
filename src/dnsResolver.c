@@ -153,15 +153,23 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 	if(isCacheRR)
 	{
 		//check if there is cached response
-		status = dnsHashLookup(rrCache, &qName->pl, qType, (void**)qResponse);
+		dnsRRCacheInfo_t* pRRCache = NULL;
+		status = dnsHashLookup(rrCache, &qName->pl, qType, (void**)&pRRCache);
 		if(status != OS_STATUS_OK)
 		{
 			logError("fails to dnsHashLookup for qName(%r), qType(%d).", &qName->pl, qType);
 			goto EXIT;
 		}
 
-		if(*qResponse)
+		if(pRRCache)
 		{
+			*qResponse = pRRCache->pDnsMsg;
+			if(!*qResponse)
+			{
+				logError("a dnsMsg is cached in rrCache, but is empty.");
+				status = OS_ERROR_INVALID_VALUE;
+				goto EXIT;
+			}
 			logInfo("find a cached DNS query response for qName(%r), qType(%d).", &qName->pl, qType);
 			qStatus = DNS_QUERY_STATUS_DONE;
 			goto EXIT;
@@ -238,6 +246,7 @@ static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQ
     //remove from hash.  Intentionally put before the notifying of pDnsMsg to app to allow app to add the same entry (may not be necessary though)
     osHash_deleteNode(pQCache->pHashElement, OS_HASH_DEL_NODE_TYPE_KEEP_USER_DATA);
 
+	//in this function, rrType can only take either DNS_RR_DATA_TYPE_MSG or DNS_RR_DATA_TYPE_STATUS
 	dnsResResponse_t rr = {};
 	if(rrStatus == DNS_RES_STATUS_OK)
 	{
@@ -514,7 +523,8 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 	debug("qName=%r, ttl=%d(sec)", &qName, ttl);
 	//cache the response in the rrCache, create a rrCache data structure
 	pRRCache = oszalloc(sizeof(dnsRRCacheInfo_t), dnsRRCacheInfo_cleanup);
-	pRRCache->pDnsMsg = osmemref(pDnsMsg);
+//	pRRCache->pDnsMsg = osmemref(pDnsMsg);
+	pRRCache->pDnsMsg = pDnsMsg;
     osHashData_t* pHashData = oszalloc(sizeof(osHashData_t), NULL);
     if(!pHashData)
     {

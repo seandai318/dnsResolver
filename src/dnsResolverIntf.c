@@ -48,7 +48,7 @@ dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResol
 	switch(qStatus)
 	{
 		case DNS_QUERY_STATUS_ONGOING:
-			if(isResolveAll)
+			if(qType != DNS_QTYPE_A && isResolveAll)
 			{
         		pCbData->pQNextInfo = osmalloc(sizeof(dnsNextQInfo_t), dnsNextQInfo_cleanup);
         		pCbData->pQNextInfo->pResResponse = oszalloc(sizeof(dnsResResponse_t), dnsResResponse_cleanup);
@@ -73,6 +73,7 @@ dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResol
 	            pCbData->pQNextInfo = osmalloc(sizeof(dnsNextQInfo_t), dnsNextQInfo_cleanup);
     	        pCbData->pQNextInfo->pResResponse = oszalloc(sizeof(dnsResResponse_t), dnsResResponse_cleanup);
      	        pCbData->pQNextInfo->pResResponse->rrType = DNS_RR_DATA_TYPE_MSGLIST;
+                osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsRspMsg);
 
           	    pCbData->pQNextInfo->origAppData.rrCallback = rrCallback;
                	pCbData->pQNextInfo->origAppData.pAppData = pData;

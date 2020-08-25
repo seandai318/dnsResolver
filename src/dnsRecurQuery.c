@@ -82,7 +82,9 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackDat
 									goto EXIT;
 								case DNS_QUERY_STATUS_DONE:
 								{
-									osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsRspMsg);
+									//this must be rrType == DNS_RR_DATA_TYPE_MSGLIST case, as pDnsRspMsg here is the next layer query response
+									osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pQCache);
+									//osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsRspMsg);
 									if(pDnsMsg->query.qType == DNS_QTYPE_SRV)
 									{
 										qStatus = dnsQueryNextLayer(pDnsMsg, pCbData);
@@ -117,7 +119,9 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackDat
 								goto EXIT;
 							case DNS_QUERY_STATUS_DONE:
                             {
-                                osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsRspMsg);
+								//this must be rrType == DNS_RR_DATA_TYPE_MSGLIST case, as pDnsRspMsg here is the next layer query response
+								osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsMsg);
+                                //osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsRspMsg);
                                 if(pDnsMsg->query.qType == DNS_QTYPE_SRV)
                                 {
                                     qStatus = dnsQueryNextLayer(pDnsMsg, pCbData);
@@ -163,7 +167,7 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 		return;
 	}
 
-	//rr.rrType can only be DNS_RR_DATA_TYPE_STATUS or DNS_RR_DATA_TYPE_MSG
+	//rr.rrType can only be DNS_RR_DATA_TYPE_STATUS or DNS_RR_DATA_TYPE_MSG, as tyhis is a callback for single query
 	switch(pRR->rrType)
 	{
 		case DNS_RR_DATA_TYPE_STATUS:

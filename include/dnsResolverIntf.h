@@ -188,18 +188,18 @@ typedef struct dnsMessage {
 
 
 typedef enum {
-	DNS_RR_DATA_TYPE_STATUS,
-	DNS_RR_DATA_TYPE_MSG,
-	DNS_RR_DATA_TYPE_MSGLIST,
+	DNS_RR_DATA_TYPE_STATUS,	//when something is wrong
+	DNS_RR_DATA_TYPE_MSG,		//only when qType==DNS_QTYPE_A or !isResolveAll
+	DNS_RR_DATA_TYPE_MSGLIST,	//all other case, this will be set, even if additional answer contains all next layer rr
 } dnsRRDType_e;
 
 
 typedef struct {
 	dnsRRDType_e rrType;
     union {
-		dnsMessage_t* pDnsRsp;
-        osList_t dnsRspList;    //each element contains dnsMessage_t*
-        dnsResStatus_e status;
+		dnsMessage_t* pDnsRsp;	//when rrType == DNS_RR_DATA_TYPE_MSG
+        osList_t dnsRspList;    //when rrType == DNS_RR_DATA_TYPE_MSGLIST, each element contains dnsMessage_t*
+        dnsResStatus_e status;	//when rrType == DNS_RR_DATA_TYPE_STATUS
     };
 } dnsResResponse_t;
 

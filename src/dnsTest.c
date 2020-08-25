@@ -7,21 +7,28 @@
 #include "osList.h"
 #include "osMemory.h"
 #include "osSockAddr.h"
+#include "osTimer.h"
 
 #include "dnsResolverIntf.h"
 
 
 static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA);
 static void dnsTestCallback(dnsResResponse_t* pRR, void* pData);
+static void startTest();
+static void dnsTest_onTimeout(uint64_t timerId, void* ptr);
 
-#define QUERY_A 0
-#define QUERY_SRV 1
+
+#define QUERY_A 1
+#define QUERY_SRV 0
+
+dnsServerConfig_t dnsServerConfig;
+
 
 bool isResolveAll = true;
 
 void dnsTest()
 {
-    dnsServerConfig_t dnsServerConfig;
+//    dnsServerConfig_t dnsServerConfig;
     dnsServerConfig.serverNum = 1;
     dnsServerConfig.serverSelMode = OS_NODE_SELECT_MODE_PRIORITY;
     dnsServerConfig.dnsServer[0].ipPort.ip.pl.p = "192.168.1.254";
@@ -35,6 +42,21 @@ void dnsTest()
 
 	debug("dnsResolver is initialized");
 
+	startTest();
+
+	uint64_t timerId = osStartTimer(10000, dnsTest_onTimeout, NULL);
+	debug("start timer=0x%lx", timerId);
+}
+
+
+static void dnsTest_onTimeout(uint64_t timerId, void* ptr)
+{
+	debug("timeout.  timerId=0x%lx", timerId); 
+	startTest();
+}
+
+static void startTest()
+{
     //perform dns testing
 //    osVPointerLen_t qName = {{"ims.globalstar.com.mnc970.mcc310.gprs", strlen("ims.globalstar.com.mnc970.mcc310.gprs")}, false, false};
     osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
@@ -68,17 +90,26 @@ void dnsTest()
 			}
 			else if(pDnsRR->rrType == DNS_RR_DATA_TYPE_MSG)
 			{
-				debug("qName=%s, qType=%d, query done.", pDnsRR->pDnsRsp->query.qName, pDnsRR->pDnsRsp->query.qType);
+				printOutcome(pDnsRR->pDnsRsp, false);
+				//debug("qName=%s, qType=%d, query done.", pDnsRR->pDnsRsp->query.qName, pDnsRR->pDnsRsp->query.qType);
 			}
 			else
 			{
-				osListElement_t* pLE = pDnsRR->dnsRspList.head;
-				while(pLE)
-				{
-					dnsMessage_t* pDnsMsg = pLE->data;
-					debug("qName=%s, qType=%d, query done.", pDnsMsg->query.qName, pDnsMsg->query.qType);
-					pLE = pLE->next;
-				}
+	            osListElement_t* pRRLE = pDnsRR->dnsRspList.head;
+    	        while(pRRLE)
+        	    {
+            	    dnsMessage_t* pDnsRsp = pRRLE->data;
+                	debug("qName=%s, qType=%d", pDnsRsp->query.qName, pDnsRsp->query.qType);
+
+                	if(pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
+                	{
+                    	debug("query response error=%d", pDnsRsp->hdr.flags & DNS_RCODE_MASK);
+                    	return;
+                	}
+
+                	printOutcome(pDnsRsp, false);
+                	pRRLE = pRRLE->next;
+            	}
 			}
 			break;
 		case DNS_QUERY_STATUS_FAIL:
