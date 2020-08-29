@@ -98,6 +98,7 @@ dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResol
                 		break;
             		case DNS_QUERY_STATUS_DONE:
                 		*ppResResponse = pCbData->pQNextInfo->pResResponse;
+						//expect app to free pCbData->pQNextInfo->pResResponse
                 		pCbData->pQNextInfo->pResResponse = NULL;
                 		osfree(pCbData);
                 		break;

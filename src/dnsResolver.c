@@ -171,6 +171,7 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 				goto EXIT;
 			}
 			logInfo("find a cached DNS query response for qName(%r), qType(%d).", &qName->pl, qType);
+			osVPL_free(qName);
 			qStatus = DNS_QUERY_STATUS_DONE;
 			goto EXIT;
 		}
@@ -180,6 +181,8 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 	if(dnsIsQueryOngoing(&qName->pl, qType, isCacheRR, rrCallback, pData, ppQCache))
 	{
 		logInfo("there is a query ongoing for qName(%r), qType(%d).", &qName->pl, qType);
+
+		osVPL_free(qName);
 		goto EXIT;
 	}
 
@@ -189,6 +192,7 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 EXIT:
 	if(status != OS_STATUS_OK)
 	{
+		osVPL_free(qName);
 		qStatus = DNS_QUERY_STATUS_FAIL;
 	}
 	DEBUG_END
@@ -540,6 +544,7 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 
     //start the ttl timer
     pRRCache->ttlTimerId = osStartTimer(ttl*1000, dns_onRRCacheTimeout, pRRCache);
+
 EXIT:
 	osfree(pQCache);
 	osMBuf_dealloc(pBuf);
@@ -1070,6 +1075,7 @@ static void dnsQCacheInfo_cleanup(void* data)
 		return;
 	}
 
+debug("to-remove, osVPL_free(pQCache->qName);");
 	osVPL_free(pQCache->qName);
 	osMBuf_dealloc(pQCache->pBuf);
 	//keep the user data, as the user data is actually pQCache.

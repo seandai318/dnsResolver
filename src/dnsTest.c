@@ -24,7 +24,7 @@ static void dnsTest_onTimeout(uint64_t timerId, void* ptr);
 dnsServerConfig_t dnsServerConfig;
 
 
-bool isResolveAll = false;
+bool isResolveAll = true;
 
 void dnsTest()
 {
@@ -53,6 +53,8 @@ static void dnsTest_onTimeout(uint64_t timerId, void* ptr)
 {
 	debug("timeout.  timerId=0x%lx", timerId); 
 	startTest();
+	timerId = osStartTimer(60000, dnsTest_onTimeout, NULL);
+    debug("start timer=0x%lx", timerId);
 }
 
 static void startTest()
@@ -111,9 +113,16 @@ static void startTest()
                 	pRRLE = pRRLE->next;
             	}
 			}
+
+			//free the qResponse after the use
+			osfree(pDnsRR);
+			//no need to free qName, it shall already be freed inside dnsQuery
+			//osVPL_free(qName);
 			break;
 		case DNS_QUERY_STATUS_FAIL:
-			logError("fails to dnsQuery, qName=%r, status = %d.", qName, qStatus);
+			logError("fails to dnsQuery, status = %d.", qStatus);
+            //no need to free qName, it shall already be freed inside dnsQuery
+            //osVPL_free(qName);
 			goto EXIT;
 			break;
 	}

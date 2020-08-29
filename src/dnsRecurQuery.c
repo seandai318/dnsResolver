@@ -115,13 +115,18 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackDat
 						switch(qStatus)
                         {
                             case DNS_QUERY_STATUS_FAIL:					
-                                //do nothing, dnsInternalCallback() will notify app and free memory
+                                //free nextQName, dnsInternalCallback() will notify app and free memory
+								osVPL_free(nextQName);
 								goto EXIT;
 							case DNS_QUERY_STATUS_DONE:
                             {
 								//this must be rrType == DNS_RR_DATA_TYPE_MSGLIST case, as pDnsRspMsg here is the next layer query response
 								osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsMsg);
                                 //osList_append(&pCbData->pQNextInfo->pResResponse->dnsRspList, pDnsRspMsg);
+
+								//free nextQName
+								osVPL_free(nextQName);
+
                                 if(pDnsMsg->query.qType == DNS_QTYPE_SRV)
                                 {
                                     qStatus = dnsQueryNextLayer(pDnsMsg, pCbData);
@@ -133,6 +138,8 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackDat
                                 osList_append(&pCbData->pQNextInfo->qCacheList, pQCache);
                                 break;
                             default:
+								//free nextQName
+								osfree(nextQName);
                                 break;
                         }
                 	}
