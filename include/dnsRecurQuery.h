@@ -11,7 +11,7 @@
 typedef struct {
     dnsResResponse_t* pResResponse;
     dnsQAppInfo_t origAppData;
-    osList_t qCacheList;    //each list contains dnsQCacheInfo_t
+    osList_t qCacheList;    //each element contains dnsQCacheInfo_t for ongoing query
 } dnsNextQInfo_t;
 
 
