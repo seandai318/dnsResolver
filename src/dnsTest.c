@@ -193,12 +193,6 @@ static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA)
 	{
 		case DNS_QTYPE_A:
 		{
-#if 0
-			osIpPort_t ipPort={{"93.184.216.34", strlen("93.184.216.34")}, 0};
-			struct sockaddr_in sockAddr;
-			osConvertPLton(&ipPort, false, &sockAddr);
-			debug("sockAddr.sin_addr.s_addr=0x%x for 93.184.216.34", sockAddr.sin_addr.s_addr);
-#endif
 			debug("DNS_QTYPE_A, anCount=%d", pDnsRsp->hdr.anCount);
 			osListElement_t* pLE = pDnsRsp->answerList.head;
 			int i=0;
