@@ -1,4 +1,4 @@
-/* Copyright 2020, 2019, Sean Dai
+/* Copyright (c) 2019, 2020, Sean Dai
  *
  * This file implements recursive queries until either a A record is received or query error happens.
  * Sometimes when queries SRV or NAPTR, the DNS server just provides RR answer for the query type, does
@@ -295,7 +295,7 @@ static bool isRspHasNextLayerQ(char* qName, dnsQType_e qType, osList_t* pAddtlAn
 		//for qName, so need to continue search until the additional answer is completely searched
         if(strcasecmp(pArDnsRR->name, qName) == 0)
         {
-debug("A record, in addtlAnswer, uri=%s", pArDnsRR->name);
+            debug("find a qName match in the addtlAnswer, uri=%s, qType=%d", pArDnsRR->name, qType);
 
 			//for A query, assume only one answer per qName, so as soon as one match is found, return 
 			if(qType == DNS_QTYPE_A)

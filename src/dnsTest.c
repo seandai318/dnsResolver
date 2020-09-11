@@ -1,3 +1,8 @@
+/* Copyright (c) 2019, 2020, Sean Dai
+ *
+ * The test routine for DNS Resolver for query type A, SRV and enum
+ */
+
 #include <string.h>
 #include <arpa/inet.h>
 
@@ -31,8 +36,8 @@ void dnsTest()
 //    dnsServerConfig_t dnsServerConfig;
     dnsServerConfig.serverNum = 1;
     dnsServerConfig.serverSelMode = OS_NODE_SELECT_MODE_PRIORITY;
-    dnsServerConfig.dnsServer[0].ipPort.ip.pl.p = "192.168.1.254";
-    dnsServerConfig.dnsServer[0].ipPort.ip.pl.l = strlen("192.168.1.254");
+    dnsServerConfig.dnsServer[0].ipPort.ip.pl.p = "10.247.137.9";
+    dnsServerConfig.dnsServer[0].ipPort.ip.pl.l = strlen("10.247.137.9");
     dnsServerConfig.dnsServer[0].ipPort.port = 53;
     dnsServerConfig.dnsServer[0].ipPort.ip.isVPLDynamic = false;
     dnsServerConfig.dnsServer[0].ipPort.ip.isPDynamic = false;
@@ -64,15 +69,19 @@ static void startTest()
     osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
 	dnsResResponse_t* pDnsRR = NULL;
 #if QUERY_A
-	qName->pl.p ="example.com";
-	qName->pl.l = strlen("example.com");
+//	qName->pl.p ="example.com";
+//	qName->pl.l = strlen("example.com");
+    qName->pl.p ="icscf01-mlplab.ims.globalstar.com";
+    qName->pl.l = strlen("icscf01-mlplab.ims.globalstar.com");
 	qName->isPDynamic = false;
 	qName->isVPLDynamic = true;
     dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_SRV
-    qName->pl.p ="_sip._udp.sip.voice.google.com";
-    qName->pl.l = strlen("_sip._udp.sip.voice.google.com");
+//    qName->pl.p ="_sip._udp.sip.voice.google.com";
+//    qName->pl.l = strlen("_sip._udp.sip.voice.google.com");
+    qName->pl.p ="_sip._udp.scscf01-mlplab.ims.globalstar.com";
+    qName->pl.l = strlen("_sip._udp.scscf01-mlplab.ims.globalstar.com");
     qName->isPDynamic = false;
     qName->isVPLDynamic = true;
     dnsMessage_t* pDnsMsg = NULL;
@@ -176,7 +185,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
             	    return;
             	}
 
-				printOutcome(pDnsRsp, false);
+				printOutcome(pDnsRsp, true);
 				pRRLE = pRRLE->next;
 			}
 			break;
@@ -234,7 +243,7 @@ static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA)
 						continue;
 					}
 
-					if(strcasecmp(pARDnsRR->name, pARDnsRR->srv.target) == 0)
+					if(strcasecmp(pARDnsRR->name, pDnsRR->srv.target) == 0)
 					{
 						debug("A record, in addtlAnswer[%d], uri=%s", j, pARDnsRR->name);
 						struct sockaddr_in rxSockAddr;

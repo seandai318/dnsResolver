@@ -1,4 +1,4 @@
-/* copyright 2020, Sean Dai
+/* copyright (c) 2020, Sean Dai
  *
  * implement DNS resolver functionalities, support three query types: A, SRV, NAPTR
  * For A query, support IPv4 only. For other queries, raw DNS rr will be returned,
@@ -665,6 +665,7 @@ EXIT:
 */
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 {
+    DEBUG_BEGIN
 	osStatus_e status = OS_STATUS_OK;
 
     //it is possible labelSize=0, indicating the domain name is <Root>
@@ -677,7 +678,7 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 
 	//starts from the first char after the first label
 	uint8_t labelSize;
-	size_t origPos = pBuf->pos + 1;	//points to the first char after the first label
+	size_t origPos = pBuf->pos;	//points to the first label of the domain name
 	while(pBuf->buf[pBuf->pos] != 0 && pBuf->pos < pBuf->size)
 	{
 		labelSize = pBuf->buf[pBuf->pos];
@@ -692,22 +693,30 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 		 //0xc0 = the first 2 bits of a 16 bits field are 1, per rfc1035 section 4.1.4, it indicates the domain name is a pointer
 		if(labelSize >= 0xc0)
 	    {
-        	uint16_t origUriPos = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos] && 0x3fff);
+        	uint16_t origUriPos = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]) & 0x3fff;
 			//copy the uri before this label, note the label has been replace with '.' in earlier iteration
-			if(pBuf->pos > origPos)
+			if(pBuf->pos > origPos+1)
 			{
-				memcpy(pUri, &pBuf->buf[origPos], pBuf->pos-origPos);
+                //the char in origPos shall be a label, the uri starts right after the first label
+				memcpy(pUri, &pBuf->buf[origPos+1], pBuf->pos-origPos-1);
+                strcpy(&pUri[pBuf->pos-origPos-1], &pBuf->buf[origUriPos]);
 			}
+            else
+            {
+                //the new URI completely points to a subset of a previous URI, remove the pointed top label in the previous URI 
+                strcpy(pUri, &pBuf->buf[++origUriPos]);
+            }
 			//copy the remaining uri since the offset label is used, per rfc1035, this must be the last label.  note the earlier occurance of the domain name's label must have been replaced by '.' too
-			strcpy(&pUri[pBuf->pos-origPos], &pBuf->buf[origUriPos]);
 			pBuf->pos += 2;
+
+            debug("domain name=%s, using pointer", pUri);
         	goto EXIT;
     	}
 
 		if(labelSize > DNS_MAX_DOMAIN_NAME_LABEL_SIZE)
 		{
 			logError("a domain name label size(0x%x) in pos(0x%lx) is bigger than maximum allowed(%d).", labelSize, pBuf->pos, DNS_MAX_DOMAIN_NAME_LABEL_SIZE);
-			pBuf->pos = origPos - 1;
+			pBuf->pos = origPos;
 			status = OS_ERROR_INVALID_VALUE;
 			goto EXIT;
 		}
@@ -719,12 +728,12 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 	if(pBuf->pos >= pBuf->size)
 	{
         logError("the parsing of domain name crosses pBuf->size(%ld).", pBuf->size);
-		pBuf->pos = origPos - 1;
+		pBuf->pos = origPos;
         status = OS_ERROR_INVALID_VALUE;
         goto EXIT;
     }
 
-	if(pBuf->pos - origPos >= DNS_MAX_NAME_SIZE)
+	if(pBuf->pos - origPos > DNS_MAX_NAME_SIZE)
 	{
 		logError("domain name size(%ld) is larger than DNS_MAX_NAME_SIZE(%d).", pBuf->pos - origPos, DNS_MAX_NAME_SIZE);
 		pBuf->pos = origPos;
@@ -732,8 +741,8 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 		goto EXIT;
 	}
 
-	//the URI in mBuf ends with 0, i.e., pBuf->buf[pBuf->pos] = 0
-	strcpy(pUri, &pBuf->buf[origPos]);
+	//the URI in mBuf starts 1 char after origPos (the 1st har is a label), and ends with 0, i.e., pBuf->buf[pBuf->pos] = 0
+	strcpy(pUri, &pBuf->buf[origPos+1]);
 
 	//point the pos to the first char after the uri, including the terminating 00
 	pBuf->pos++;
@@ -741,6 +750,7 @@ static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri)
 	debug("domain name=%s", pUri);
 
 EXIT:
+    DEBUG_END
 	return status;
 }	
 	
@@ -772,6 +782,7 @@ EXIT:
 
 static dnsRR_t* dnsParseRR(osMBuf_t* pBuf)
 {
+DEBUG_BEGIN
 	osStatus_e status = OS_STATUS_OK;
 	dnsRR_t* pRR = osmalloc(sizeof(dnsRR_t), NULL);
 	if(!pRR)
@@ -788,6 +799,7 @@ static dnsRR_t* dnsParseRR(osMBuf_t* pBuf)
     }
 
 	pRR->type = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
+    debug("domain name=%s, dns rr type=%d, pos=0x%x", pRR->name, pRR->type, pBuf->pos);
     pBuf->pos += 2;
 	pRR->rrClass = htobe16(*(uint16_t*)&pBuf->buf[pBuf->pos]);
     pBuf->pos += 2;
@@ -893,6 +905,7 @@ EXIT:
 		pRR = osfree(pRR);
 	}
 
+DEBUG_END
 	return pRR;
 }
 
@@ -1075,7 +1088,6 @@ static void dnsQCacheInfo_cleanup(void* data)
 		return;
 	}
 
-debug("to-remove, osVPL_free(pQCache->qName);");
 	osVPL_free(pQCache->qName);
 	osMBuf_dealloc(pQCache->pBuf);
 	//keep the user data, as the user data is actually pQCache.
