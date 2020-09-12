@@ -23,8 +23,11 @@ static void startTest();
 static void dnsTest_onTimeout(uint64_t timerId, void* ptr);
 
 
+//for the following 3 query type, only one can be set to 1
 #define QUERY_A 0
-#define QUERY_SRV 1
+#define QUERY_SRV 0
+#define QUERY_NAPTR 0
+#define QUERY_ENUM	1
 
 dnsServerConfig_t dnsServerConfig;
 
@@ -86,6 +89,22 @@ static void startTest()
     qName->isVPLDynamic = true;
     dnsMessage_t* pDnsMsg = NULL;
     dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_SRV, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
+#endif
+#if QUERY_NAPTR
+    qName->pl.p ="mtas.ims.globalstar.com";
+    qName->pl.l = strlen("mtas.ims.globalstar.com");
+    qName->isPDynamic = false;
+    qName->isVPLDynamic = true;
+    dnsMessage_t* pDnsMsg = NULL;
+    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
+#endif
+#if QUERY_ENUM
+    qName->pl.p ="7.6.4.4.9.9.7.3.0.4.1.e164.arpa";
+    qName->pl.l = strlen("7.6.4.4.9.9.7.3.0.4.1.e164.arpa");
+    qName->isPDynamic = false;
+    qName->isVPLDynamic = true;
+    dnsMessage_t* pDnsMsg = NULL;
+    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 
 	switch(qStatus)
@@ -305,6 +324,39 @@ static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA)
 			break;
 		}
 		case DNS_QTYPE_NAPTR:
+        {
+            osListElement_t* pLE = pDnsRsp->answerList.head;
+            int i=0;
+            while(pLE)
+            {
+                int isAFound = false;
+                dnsRR_t* pDnsRR = pLE->data;
+                debug("NAPTR, i=%d, type=%d, rrClass=%d, ttl=%d, order=%d, pref=%d, flags=%d, regexp=%r, replacement=%s", i++, pDnsRR->type, pDnsRR->rrClass, pDnsRR->ttl, pDnsRR->naptr.order, pDnsRR->naptr.pref, pDnsRR->naptr.flags, &pDnsRR->naptr.regexp, pDnsRR->naptr.replacement);
+
+                pLE = pLE->next;
+            }
+
+            osListElement_t* pARLE = pDnsRsp->addtlAnswerList.head;
+            int j=0;
+            while(pARLE)
+            {
+                dnsRR_t* pARDnsRR = pARLE->data;
+                if(pARDnsRR->type == DNS_QTYPE_A)
+                {
+	                struct sockaddr_in rxSockAddr;
+    	            rxSockAddr.sin_addr = pARDnsRR->ipAddr;
+        	        rxSockAddr.sin_port=0;
+            	    rxSockAddr.sin_family = AF_INET;
+                	debug("j=%d, A,   qName=%s, ttl=%d, ipAddr.sin_addr.s_addr=0x%x, ip=%A", j++, pARDnsRR->name, pARDnsRR->ttl, pARDnsRR->ipAddr.s_addr, &rxSockAddr);
+                }
+				else if(pARDnsRR->type == DNS_QTYPE_SRV)
+				{
+                	debug("j=%d, SRV, qName=%s, type=%d, rrClase=%d, ttl=%d, priority=%d, weight=%d, port=%d, target=%s", j++, pARDnsRR->name, pARDnsRR->type, pARDnsRR->rrClass, pARDnsRR->ttl, pARDnsRR->srv.priority, pARDnsRR->srv.weight, pARDnsRR->srv.port, pARDnsRR->srv.target);					
+				}
+				pARLE = pARLE->next;
+			}					
+            break;
+        }
 		default:
 			debug("query type=%d", pDnsRsp->query.qType);
 			break;

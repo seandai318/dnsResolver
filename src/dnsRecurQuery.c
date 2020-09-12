@@ -35,6 +35,7 @@ static bool isRspHasNextLayerQ(char* qName, dnsQType_e qType, osList_t* pAddtlAn
  */
 dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackData_t* pCbData)
 {
+	DEBUG_BEGIN
 	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_DONE;
 
     switch(pDnsRspMsg->query.qType)
@@ -50,11 +51,35 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackDat
             while(pAnLE)
             {
 				dnsRR_t* pAnDnsRR = pAnLE->data;
-				char* qName = pDnsRspMsg->query.qType == DNS_QTYPE_SRV ? pAnDnsRR->srv.target : pAnDnsRR->naptr.replacement;
-				dnsQType_e qType = pDnsRspMsg->query.qType == DNS_QTYPE_SRV ? DNS_QTYPE_A : DNS_QTYPE_SRV;
+				char* qName = NULL;
+				dnsQType_e qType = DNS_QTYPE_A;
+				if(pDnsRspMsg->query.qType == DNS_QTYPE_SRV)
+				{
+					qName = pAnDnsRR->srv.target;
+				}
+				else
+				{
+					switch(pAnDnsRR->naptr.flags)
+					{
+						case DNS_NAPTR_FLAGS_A:
+							qType = DNS_QTYPE_A;
+							qName = pAnDnsRR->naptr.replacement;
+							break;
+						case DNS_NAPTR_FLAGS_S:
+							qType = DNS_QTYPE_SRV;
+							qName = pAnDnsRR->naptr.replacement;
+							break;
+                        case DNS_NAPTR_FLAGS_U:
+                        case DNS_NAPTR_FLAGS_P:
+                        default:
+                            pAnLE = pAnLE->next;
+                            continue;
+                            break;
+					}
+				}
+
 				osList_t aQNameList = {};
 				bool isFound = isRspHasNextLayerQ(qName, qType, &pDnsRspMsg->addtlAnswerList, &aQNameList);
-
                 if(!isFound)
                 {
                     dnsMessage_t* pDnsMsg = NULL;
@@ -154,16 +179,18 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRspMsg, dnsNextQCallbackDat
     }
 
 EXIT:
+	DEBUG_END
 	return qStatus;
 }
 
 
 void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 {
+	DEBUG_BEGIN
 	if(!pData)
 	{
 		logError("null pointer, pData.");
-		return;
+		goto EXIT;
 	}
 
 	dnsNextQCallbackData_t* pCbData = pData;
@@ -171,10 +198,11 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 	if(!pQCache)
 	{
 		logError("pQNextInfo->qCacheList does not contain pCbData->pQCache(%p), unexpected.", pCbData->pQCache);
-		return;
+		goto EXIT;
 	}
 
-	//rr.rrType can only be DNS_RR_DATA_TYPE_STATUS or DNS_RR_DATA_TYPE_MSG, as tyhis is a callback for single query
+	debug("pRR->rrType=%d", pRR->rrType);
+	//rr.rrType can only be DNS_RR_DATA_TYPE_STATUS or DNS_RR_DATA_TYPE_MSG, as this is a callback for single query
 	switch(pRR->rrType)
 	{
 		case DNS_RR_DATA_TYPE_STATUS:
@@ -189,7 +217,7 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 
                 osfree(pCbData);
 			}
-			return;	
+			goto EXIT;	
 			break;			
 		case DNS_RR_DATA_TYPE_MSG:
 			//if there is already error, stop further processing, app has been notified when DNS_RR_DATA_TYPE_STATUS was first set, here no need to notify app any more
@@ -200,7 +228,7 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
             		osfree(pCbData);
         		}
 				osfree(pRR->pDnsRsp);
-				return;
+				goto EXIT;
 			}
 			else
 			{
@@ -210,7 +238,7 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 		case DNS_RR_DATA_TYPE_MSGLIST:
 		default:
 			logError("rr.rrType(%d) = DNS_RR_DATA_TYPE_MSGLIST or other unexpect value, this shall never happen.", pRR->rrType);
-			return;
+			goto EXIT;
 			break;
 	}
 
@@ -251,6 +279,7 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 	}
 
 EXIT:
+	DEBUG_END
 	return;
 }
 
@@ -275,32 +304,32 @@ EXIT:
  */
 static bool isRspHasNextLayerQ(char* qName, dnsQType_e qType, osList_t* pAddtlAnswerList, osList_t* qNameList)
 {
+DEBUG_BEGIN
+    int isFound = false;
+
 	if(qType == DNS_QTYPE_SRV && !qNameList)
 	{
 		logError("qNameList is NULL for qType = DNS_QTYPE_SRV.");
-		return false;
+		goto EXIT;
 	}
 
-	int isFound = false;
 	osListElement_t* pArLE = pAddtlAnswerList->head;
     while(pArLE)
     {
     	dnsRR_t* pArDnsRR = pArLE->data;
-        if(pArDnsRR->type != qType)
-        {
-	        continue;
-		}
+		debug("qName=%s, pArDnsRR->type=%d, qType=%d", qName, pArDnsRR->type, qType);
 
 		//found the match for qName in the additional answer.  be noted for some qType, like SRV, there may have more than one match 
 		//for qName, so need to continue search until the additional answer is completely searched
-        if(strcasecmp(pArDnsRR->name, qName) == 0)
+        if(pArDnsRR->type == qType && strcasecmp(pArDnsRR->name, qName) == 0)
         {
             debug("find a qName match in the addtlAnswer, uri=%s, qType=%d", pArDnsRR->name, qType);
 
 			//for A query, assume only one answer per qName, so as soon as one match is found, return 
 			if(qType == DNS_QTYPE_A)
 			{
-				return true;
+				isFound = true;
+				goto EXIT;
 			}
 
 			//for SRV, needs to check next layer, which is A query layer.  note the whole additional answer rr is to be searched until one is found
@@ -322,6 +351,8 @@ static bool isRspHasNextLayerQ(char* qName, dnsQType_e qType, osList_t* pAddtlAn
 		isFound = false;
 	}
 
+EXIT:
+DEBUG_END
 	return isFound;
 }
 

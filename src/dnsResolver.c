@@ -561,6 +561,7 @@ EXIT:
 
 static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode)
 {
+	DEBUG_BEGIN
 	osStatus_e status = OS_STATUS_OK;
 	dnsMessage_t* pDnsMsg = NULL;
 
@@ -654,6 +655,7 @@ EXIT:
 		pDnsMsg = osfree(pDnsMsg);
 	}
 
+	DEBUG_END
 	return pDnsMsg;
 }
 
