@@ -31,6 +31,13 @@ dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResol
 		goto EXIT;
 	}
 
+	if(qType != DNS_QTYPE_A && qType != DNS_QTYPE_SRV && qType != DNS_QTYPE_NAPTR)
+	{
+		logError("qType(%d) is not supported.", qType);
+		qStatus = DNS_QUERY_STATUS_FAIL;
+        goto EXIT;
+    }
+
 	*ppResResponse = NULL;
 	dnsQCacheInfo_t* pQCache = NULL;
 	dnsNextQCallbackData_t* pCbData = NULL;
