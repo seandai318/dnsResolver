@@ -13,16 +13,13 @@
 
 
 
-static void dnsResResponse_memref(dnsResResponse_t* pDnsRsp);
-
-
 osStatus_e dnsInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig)
 {
 	return dnsResolverInit(rrBucketSize, qBucketSize, pDnsServerConfig);
 }
 
 
-dnsQueryStatus_e dnsQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isResolveAll, bool isCacheRR, dnsResResponse_t** ppResResponse, dnsResolver_callback_h rrCallback, void* pData)
+dnsQueryStatus_e dnsQuery(osPointerLen_t* qName, dnsQType_e qType, bool isResolveAll, bool isCacheRR, dnsResResponse_t** ppResResponse, dnsResolver_callback_h rrCallback, void* pData)
 {
 	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_DONE;
 	dnsMessage_t* pDnsRspMsg = NULL;
@@ -135,35 +132,3 @@ EXIT:
 	
 	return qStatus;
 }
-
-
-static void dnsResResponse_memref(dnsResResponse_t* pDnsRsp)
-{
-    if(!pDnsRsp)
-    {
-        return;
-    }
-
-    switch(pDnsRsp->rrType)
-    {
-        case DNS_RR_DATA_TYPE_MSG:
-            osmemref(pDnsRsp->pDnsRsp);
-            break;
-        case DNS_RR_DATA_TYPE_MSGLIST:
-        {
-            osListElement_t* pLE = pDnsRsp->dnsRspList.head;
-            while(pLE)
-            {
-                osmemref(pLE->data);
-                pLE = pLE->next;
-            }
-
-            break;
-        }
-        default:
-            break;
-    }
-
-	return;
-}
-

@@ -69,51 +69,38 @@ static void startTest()
 {
     //perform dns testing
 //    osVPointerLen_t qName = {{"ims.globalstar.com.mnc970.mcc310.gprs", strlen("ims.globalstar.com.mnc970.mcc310.gprs")}, false, false};
-    osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
 	dnsResResponse_t* pDnsRR = NULL;
 #if QUERY_A
 //	qName->pl.p ="example.com";
 //	qName->pl.l = strlen("example.com");
-    qName->pl.p ="icscf01-mlplab.ims.globalstar.com";
-    qName->pl.l = strlen("icscf01-mlplab.ims.globalstar.com");
-	qName->isPDynamic = false;
-	qName->isVPLDynamic = true;
-    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
+    osPointerLen_t qName = {"icscf01-mlplab.ims.globalstar.com", strlen("icscf01-mlplab.ims.globalstar.com")};
+    dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_A, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_SRV
 //    qName->pl.p ="_sip._udp.sip.voice.google.com";
 //    qName->pl.l = strlen("_sip._udp.sip.voice.google.com");
-    qName->pl.p ="_sip._udp.scscf01-mlplab.ims.globalstar.com";
-    qName->pl.l = strlen("_sip._udp.scscf01-mlplab.ims.globalstar.com");
-    qName->isPDynamic = false;
-    qName->isVPLDynamic = true;
+    osPointerLen_t qName = {"_sip._udp.scscf01-mlplab.ims.globalstar.com", strlen("_sip._udp.scscf01-mlplab.ims.globalstar.com")};
     dnsMessage_t* pDnsMsg = NULL;
-    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_SRV, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
+    dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_SRV, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_NAPTR
-    qName->pl.p ="mtas.ims.globalstar.com";
-    qName->pl.l = strlen("mtas.ims.globalstar.com");
-    qName->isPDynamic = false;
-    qName->isVPLDynamic = true;
+    osPointerLen_t qName = {"mtas.ims.globalstar.com", strlen("mtas.ims.globalstar.com")};
     dnsMessage_t* pDnsMsg = NULL;
-    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
+    dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_ENUM
-    qName->pl.p ="7.6.4.4.9.9.7.3.0.4.1.e164.arpa";
-    qName->pl.l = strlen("7.6.4.4.9.9.7.3.0.4.1.e164.arpa");
-    qName->isPDynamic = false;
-    qName->isVPLDynamic = true;
+    osPointerLen_t qName = {"7.6.4.4.9.9.7.3.0.4.1.e164.arpa", strlen("7.6.4.4.9.9.7.3.0.4.1.e164.arpa")};
     dnsMessage_t* pDnsMsg = NULL;
-    dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
+    dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 
 	switch(qStatus)
 	{
 		case DNS_QUERY_STATUS_ONGOING:
-			debug("dnsQuery(%r) is ongoing", qName);
+			debug("dnsQuery(%r) is ongoing", &qName);
 			break;
 		case DNS_QUERY_STATUS_DONE:
-			debug("dnsQuery(%r) is done.", qName);
+			debug("dnsQuery(%r) is done.", &qName);
 			if(pDnsRR->rrType == DNS_RR_DATA_TYPE_STATUS)
 			{
 				debug("rr status = %d", pDnsRR->status);
@@ -278,21 +265,17 @@ static void printOutcome(dnsMessage_t* pDnsRsp, bool isUntilA)
 
 				if(!isAFound)
 				{
-					osVPointerLen_t* qName = osmalloc(sizeof(osVPointerLen_t), NULL);
-    				qName->pl.p = pDnsRR->srv.target;
-    				qName->pl.l = strlen(qName->pl.p);
-    				qName->isPDynamic = false;
-    				qName->isVPLDynamic = true;
+    				osPointerLen_t qName = {pDnsRR->srv.target, strlen((char*)pDnsRR->srv.target)};
 					dnsResResponse_t* pDnsRR;
-					dnsQueryStatus_e qStatus = dnsQuery(qName, DNS_QTYPE_A, false, true, &pDnsRR, dnsTestCallback, NULL);
+					dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_A, false, true, &pDnsRR, dnsTestCallback, NULL);
 
 				    switch(qStatus)
     				{
         				case DNS_QUERY_STATUS_ONGOING:
-				            debug("dnsQuery(%r) is ongoing", qName);
+				            debug("dnsQuery(%r) is ongoing", &qName);
             				break;
         				case DNS_QUERY_STATUS_DONE:
-            				debug("dnsQuery(%r) is done.", qName);
+            				debug("dnsQuery(%r) is done.", &qName);
             				if(pDnsRR->rrType == DNS_RR_DATA_TYPE_STATUS)
             				{
                 				debug("rr status = %d", pDnsRR->status);

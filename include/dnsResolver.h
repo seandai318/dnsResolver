@@ -23,7 +23,7 @@ typedef struct {
 
 
 typedef struct {
-    osVPointerLen_t* qName;
+    osVPointerLen_t qName;
     dnsQType_e qType;
     bool isCacheRR;
     uint16_t qTrId;
@@ -52,7 +52,8 @@ typedef struct {
 
 
 osStatus_e dnsResolverInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig);
-dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData);
+dnsQueryStatus_e dnsQueryInternal(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData);
+void dnsResResponse_memref(dnsResResponse_t* pDnsRsp);
 void dnsResResponse_cleanup(void* pData);
 
 #endif

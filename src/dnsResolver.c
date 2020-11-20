@@ -34,7 +34,7 @@ static __thread uint16_t dnsTrId;
 static osStatus_e dnsHashLookup(osHash_t* pHash, osPointerLen_t* qName, dnsQType_e qType, void** pHashData);
 static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg);
 static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
-static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
+static osStatus_e dnsPerformQuery(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache);
 static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf);
 static dnsMessage_t* dnsParseMessage(osMBuf_t* pBuf, dnsRcode_e* replyCode);
 static osStatus_e dnsParseDomainName(osMBuf_t* pBuf, char* pUri);
@@ -133,7 +133,7 @@ EXIT:
 
 /* if isCacheRR == true, caller indicates cache the RR if possible, otherwise, the resolver would not cache the rr.  The resolver also uses this flag to check if it needs to check the rrCache first before performing dns query.  It is expected that user may not want to set this flag to true for NSAPR u query (enum query) as each call may require a enum query and the same E164 number may not re-occur for long time, it will be waste of resources to store its rr
 */
-dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData)
+dnsQueryStatus_e dnsQueryInternal(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData)
 {
 	DEBUG_BEGIN
 	dnsQueryStatus_e qStatus = DNS_QUERY_STATUS_ONGOING;
@@ -149,15 +149,15 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 	*qResponse = NULL;
 	*ppQCache = NULL;
 
-	debug("qName=%r, qType=%d, isCacheRR=%d", &qName->pl, qType, isCacheRR);
+	debug("qName=%r, qType=%d, isCacheRR=%d", qName, qType, isCacheRR);
 	if(isCacheRR)
 	{
 		//check if there is cached response
 		dnsRRCacheInfo_t* pRRCache = NULL;
-		status = dnsHashLookup(rrCache, &qName->pl, qType, (void**)&pRRCache);
+		status = dnsHashLookup(rrCache, qName, qType, (void**)&pRRCache);
 		if(status != OS_STATUS_OK)
 		{
-			logError("fails to dnsHashLookup for qName(%r), qType(%d).", &qName->pl, qType);
+			logError("fails to dnsHashLookup for qName(%r), qType(%d).", qName, qType);
 			goto EXIT;
 		}
 
@@ -170,19 +170,16 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 				status = OS_ERROR_INVALID_VALUE;
 				goto EXIT;
 			}
-			logInfo("find a cached DNS query response for qName(%r), qType(%d).", &qName->pl, qType);
-			osVPL_free(qName, true);
+			logInfo("find a cached DNS query response for qName(%r), qType(%d).", qName, qType);
 			qStatus = DNS_QUERY_STATUS_DONE;
 			goto EXIT;
 		}
 	}
  	
 	//check if a query is ongoing for the same qName
-	if(dnsIsQueryOngoing(&qName->pl, qType, isCacheRR, rrCallback, pData, ppQCache))
+	if(dnsIsQueryOngoing(qName, qType, isCacheRR, rrCallback, pData, ppQCache))
 	{
-		logInfo("there is a query ongoing for qName(%r), qType(%d).", &qName->pl, qType);
-
-		osVPL_free(qName, true);
+		logInfo("there is a query ongoing for qName(%r), qType(%d).", qName, qType);
 		goto EXIT;
 	}
 
@@ -192,7 +189,6 @@ dnsQueryStatus_e dnsQueryInternal(osVPointerLen_t* qName, dnsQType_e qType, bool
 EXIT:
 	if(status != OS_STATUS_OK)
 	{
-		osVPL_free(qName, true);
 		qStatus = DNS_QUERY_STATUS_FAIL;
 	}
 	DEBUG_END
@@ -337,7 +333,7 @@ EXIT:
 }
 
 
-static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache)
+static osStatus_e dnsPerformQuery(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsResolver_callback_h rrCallback, void* pData, dnsQCacheInfo_t** ppQCache)
 {
 	osStatus_e status = OS_STATUS_OK;
 
@@ -372,7 +368,7 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
         goto EXIT;
     }
 
-	pQCache->qName = qName;
+	osVPL_copyPL(&pQCache->qName, qName);
 	pQCache->qType = qType;
 	pQCache->isCacheRR = isCacheRR;
 	pQAppInfo->rrCallback = rrCallback;
@@ -389,9 +385,9 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 	//fill uri
 	size_t labelPos = pBuf->pos++;
 	uint8_t labelCount = 0;
-	for(int i=0; i<qName->pl.l; i++)
+	for(int i=0; i<qName->l; i++)
 	{
-		if(qName->pl.p[i] == '.')
+		if(qName->p[i] == '.')
 		{
 			pBuf->buf[labelPos] = labelCount;
 			labelCount = 0;
@@ -400,7 +396,7 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
 		else
 		{
 			labelCount++;
- 			osMBuf_writeU8(pBuf, qName->pl.p[i], true);
+ 			osMBuf_writeU8(pBuf, qName->p[i], true);
 		}
 	}
 	pBuf->buf[labelPos] = labelCount;
@@ -450,7 +446,7 @@ static osStatus_e dnsPerformQuery(osVPointerLen_t* qName, dnsQType_e qType, bool
     }
 
     pHashData->hashKeyType = OSHASHKEY_INT;
-	pHashData->hashKeyInt = osHash_getKeyPL_extraKey(&qName->pl, false, qType);
+	pHashData->hashKeyInt = osHash_getKeyPL_extraKey(qName, false, qType);
 	pHashData->pData = pQCache;
 	pQCache->pHashElement = osHash_add(qCache, pHashData);
 
@@ -969,7 +965,7 @@ static void dns_onQCacheTimeout(uint64_t timerId, void* ptr)
 
 EXIT:
 	//notify all Query listeners
-	dnsRRMatchQCacheAndNotifyApp(&pQCache->qName->pl, pQCache->qType, DNS_RES_ERROR_NO_RESPONSE, NULL);
+	dnsRRMatchQCacheAndNotifyApp(&pQCache->qName.pl, pQCache->qType, DNS_RES_ERROR_NO_RESPONSE, NULL);
 
     osfree(pQCache);
 }
@@ -1091,7 +1087,7 @@ static void dnsQCacheInfo_cleanup(void* data)
 		return;
 	}
 
-	osVPL_free(pQCache->qName, true);
+	osVPL_free(&pQCache->qName, true);
 	osMBuf_dealloc(pQCache->pBuf);
 	//keep the user data, as the user data is actually pQCache.
     osHash_deleteNode(pQCache->pHashElement, OS_HASH_DEL_NODE_TYPE_KEEP_USER_DATA);
@@ -1118,6 +1114,37 @@ static void dnsRRCacheInfo_cleanup(void* data)
 	{
 		pRRCache->ttlTimerId = osStopTimer(pRRCache->ttlTimerId);
 	}
+}
+
+
+void dnsResResponse_memref(dnsResResponse_t* pDnsRsp)
+{
+    if(!pDnsRsp)
+    {
+        return;
+    }
+
+    switch(pDnsRsp->rrType)
+    {
+        case DNS_RR_DATA_TYPE_MSG:
+            osmemref(pDnsRsp->pDnsRsp);
+            break;
+        case DNS_RR_DATA_TYPE_MSGLIST:
+        {
+            osListElement_t* pLE = pDnsRsp->dnsRspList.head;
+            while(pLE)
+            {
+                osmemref(pLE->data);
+                pLE = pLE->next;
+            }
+
+            break;
+        }
+        default:
+            break;
+    }
+
+    return;
 }
 
 
