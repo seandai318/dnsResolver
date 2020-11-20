@@ -25,7 +25,6 @@ dnsQueryStatus_e dnsQueryNextLayer(dnsMessage_t* pDnsRespMsg, dnsNextQCallbackDa
 void dnsInternalCallback(dnsResResponse_t* pRR, void* pData);
 void dnsNextQCallbackData_cleanup(void* pData);
 void dnsNextQInfo_cleanup(void* pData);
-void dnsResResponse_cleanup(void* pData);
 
 
 #endif

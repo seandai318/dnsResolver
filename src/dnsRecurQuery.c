@@ -212,7 +212,8 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 				pCbData->pQNextInfo->pResResponse->rrType = DNS_RR_DATA_TYPE_STATUS;
 				pCbData->pQNextInfo->pResResponse->status = pRR->status;
 	
-				//expect app to refer pCbData->pQNextInfo->pResResponse if it wants to keep the data response
+				//refer RR for app.  When app frees pResResponse, RR will be dereferred
+				dnsResResponse_memref(pCbData->pQNextInfo->pResResponse);
                 pCbData->pQNextInfo->origAppData.rrCallback(pCbData->pQNextInfo->pResResponse, pCbData->pQNextInfo->origAppData.pAppData);
 
                 osfree(pCbData);
@@ -256,7 +257,8 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
     	case DNS_QUERY_STATUS_DONE:
 			if(osList_isEmpty(&pCbData->pQNextInfo->qCacheList))
 			{
-                //expect app to refer pCbData->pQNextInfo->pResResponse if it wants to keep the data response
+                //refer RR for app.  When app frees pResResponse, RR will be dereferred
+                dnsResResponse_memref(pCbData->pQNextInfo->pResResponse);
 				pCbData->pQNextInfo->origAppData.rrCallback(pCbData->pQNextInfo->pResResponse, pCbData->pQNextInfo->origAppData.pAppData);
 
 				osfree(pCbData);
@@ -270,7 +272,8 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 		
             if(osList_isEmpty(&pCbData->pQNextInfo->qCacheList))
             {
-                //expect app to refer pCbData->pQNextInfo->pResResponse if it wants to keep the data response
+                //refer RR for app.  When app frees pResResponse, RR will be dereferred
+                dnsResResponse_memref(pCbData->pQNextInfo->pResResponse);
                 pCbData->pQNextInfo->origAppData.rrCallback(pCbData->pQNextInfo->pResResponse, pCbData->pQNextInfo->origAppData.pAppData);
 
                 osfree(pCbData);
@@ -382,28 +385,4 @@ void dnsNextQInfo_cleanup(void* pData)
 	osList_clear(&pNQInfo->qCacheList);
 	//if app needs pNQInfo->pResResponse, they shall refer the data structure
     osfree(pNQInfo->pResResponse);
-}
-
-
-void dnsResResponse_cleanup(void* pData)
-{
-	if(!pData)
-	{
-		return;
-	}
-
-	/* the dnsMsg will be freed in dnsResolver.c after rrCache is timed out.  For app, it also does not need to 
-     * to free the dnsMsg after using it within the call chain.  But a app wants to keep it, it has to refer it.
-     */    
-	dnsResResponse_t* pRR = pData;
-	switch(pRR->rrType)
-	{
-		case DNS_RR_DATA_TYPE_MSGLIST:
-			osList_clear(&pRR->dnsRspList);
-			break;
-		case DNS_RR_DATA_TYPE_MSG:
-		case DNS_RR_DATA_TYPE_STATUS:
-		default:
-			break;
-	}
 }

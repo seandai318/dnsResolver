@@ -250,25 +250,26 @@ static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQ
     //remove from hash.  Intentionally put before the notifying of pDnsMsg to app to allow app to add the same entry (may not be necessary though)
     osHash_deleteNode(pQCache->pHashElement, OS_HASH_DEL_NODE_TYPE_KEEP_USER_DATA);
 
-	//in this function, rrType can only take either DNS_RR_DATA_TYPE_MSG or DNS_RR_DATA_TYPE_STATUS
-	dnsResResponse_t rr = {};
-	if(rrStatus == DNS_RES_STATUS_OK)
-	{
-		rr.rrType = DNS_RR_DATA_TYPE_MSG;
-		rr.pDnsRsp = pDnsMsg;
-	}
-	else
-	{
-        rr.rrType = DNS_RR_DATA_TYPE_STATUS;
-        rr.status = rrStatus;
-    }
-
     //notify the request owners one after another
     osListElement_t* pLE = pQCache->appDataList.head;
     while(pLE)
     {
+		dnsResResponse_t* pRR = osmalloc(sizeof(dnsResResponse_t), dnsResResponse_cleanup);
+	    //in this function, rrType can only take either DNS_RR_DATA_TYPE_MSG or DNS_RR_DATA_TYPE_STATUS		
+    	if(rrStatus == DNS_RES_STATUS_OK)
+    	{
+        	pRR->rrType = DNS_RR_DATA_TYPE_MSG;
+	        //refer pDnsRsp for app.  When app frees pResResponse, RR will be dereferred
+        	pRR->pDnsRsp = osmemref(pDnsMsg);
+    	}
+    	else
+    	{
+        	pRR->rrType = DNS_RR_DATA_TYPE_STATUS;
+        	pRR->status = rrStatus;
+    	}
+
         dnsQAppInfo_t* pApp = pLE->data;
-        pApp->rrCallback(&rr, pApp->pAppData);
+        pApp->rrCallback(pRR, pApp->pAppData);
         pLE = pLE->next;
     }
 
@@ -1117,4 +1118,30 @@ static void dnsRRCacheInfo_cleanup(void* data)
 	{
 		pRRCache->ttlTimerId = osStopTimer(pRRCache->ttlTimerId);
 	}
+}
+
+
+void dnsResResponse_cleanup(void* pData)
+{
+    if(!pData)
+    {
+        return;
+    }
+
+    /* the dnsMsg/RR will be freed in dnsResolver.c after rrCache is timed out.  On the other side,
+     * every time a dnsResponse is returned to app, RRs are referenced.  they need to be freed when app is done with RR.
+     */
+    dnsResResponse_t* pRR = pData;
+    switch(pRR->rrType)
+    {
+        case DNS_RR_DATA_TYPE_MSGLIST:
+            osList_delete(&pRR->dnsRspList);
+            break;
+        case DNS_RR_DATA_TYPE_MSG:
+            osfree(pRR->pDnsRsp);
+            break;
+        case DNS_RR_DATA_TYPE_STATUS:
+        default:
+            break;
+    }
 }
