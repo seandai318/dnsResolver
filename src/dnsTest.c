@@ -29,14 +29,14 @@ static void dnsTest_onTimeout(uint64_t timerId, void* ptr);
 #define QUERY_NAPTR 0
 #define QUERY_ENUM	1
 
-dnsServerConfig_t dnsServerConfig;
+//dnsServerConfig_t dnsServerConfig;
 
 
 bool isResolveAll = true;
 
 void dnsTest()
 {
-//    dnsServerConfig_t dnsServerConfig;
+#if 0
     dnsServerConfig.serverNum = 1;
     dnsServerConfig.serverSelMode = OS_NODE_SELECT_MODE_PRIORITY;
     dnsServerConfig.dnsServer[0].ipPort.ip.pl.p = "10.247.137.9";
@@ -47,7 +47,8 @@ void dnsTest()
     dnsServerConfig.dnsServer[0].priority = 10;
 
     dnsInit(64, 64, &dnsServerConfig);
-
+#endif
+	dnsResolverInit("~/project/app/mas/config/", "dnsConfig.xsd", "dnsConfig.xml");
 	debug("dnsResolver is initialized");
 
 	startTest();

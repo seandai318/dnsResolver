@@ -13,11 +13,6 @@
 
 
 
-osStatus_e dnsInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig)
-{
-	return dnsResolverInit(rrBucketSize, qBucketSize, pDnsServerConfig);
-}
-
 
 dnsQueryStatus_e dnsQuery(osPointerLen_t* qName, dnsQType_e qType, bool isResolveAll, bool isCacheRR, dnsResResponse_t** ppResResponse, dnsResolver_callback_h rrCallback, void* pData)
 {

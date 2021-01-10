@@ -25,11 +25,11 @@
 #include "dnsResolverIntf.h"
 
 
-static __thread osHash_t* rrCache;	//cached rr records
-static __thread osHash_t* qCache;	//ongoing queries, each element contains dnsQCacheInfo_t, multiple requests with the same qName and qType are combined into one element with each request's appData is appended in appDataList
-static __thread osList_t serverFd;	//each element contains dnsUdpActiveFdInfo_t.
-static dnsServerSelInfo_t serverSelInfo;
-static __thread uint16_t dnsTrId;
+static __thread osHash_t* gRRCache;	//cached rr records
+static __thread osHash_t* gQCache;	//ongoing queries, each element contains dnsQCacheInfo_t, multiple requests with the same qName and qType are combined into one element with each request's appData is appended in appDataList
+//static __thread osList_t serverFd;	//each element contains dnsUdpActiveFdInfo_t.
+static dnsServerSelInfo_t gServerSelInfo;
+static __thread uint16_t gDnsTrId;
 
 static osStatus_e dnsHashLookup(osHash_t* pHash, osPointerLen_t* qName, dnsQType_e qType, void** pHashData);
 static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQType_e qType, dnsResStatus_e rrStatus, dnsMessage_t* pDnsMsg);
@@ -50,57 +50,60 @@ static void dnsQCacheInfo_cleanup(void* data);
 static void dnsRRCacheInfo_cleanup(void* data);
 
 
-osStatus_e dnsResolverInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig)
+
+osStatus_e dnsResolverInit(char* dnsFileFolder, char* dnsXsdFileName, char* dnsXmlFileName)
 {
 	osStatus_e status = OS_STATUS_OK;
+	dnsConfig_t* pDnsConfig = NULL;
 
-	if(!pDnsServerConfig)
+	dnsConfig_init(dnsFileFolder, dnsXsdFileName, dnsXmlFileName);
+	if(!pDnsConfig)
 	{
-		logError("null pointer, pDnsServerConfig.");
+		logError("failes to fetch dns configuration.");
 		status = OS_ERROR_NULL_POINTER;
 		goto EXIT;
 	}
 
-	if(pDnsServerConfig->serverNum > DNS_MAX_SERVER_NUM)
+	if(pDnsConfig->serverNum > DNS_MAX_SERVER_NUM)
 	{
-		logError("the number of DNS server num(%d) > DNS_MAX_SERVER_NUM(%d)", pDnsServerConfig->serverNum, DNS_MAX_SERVER_NUM);
+		logError("the number of DNS server num(%d) > DNS_MAX_SERVER_NUM(%d)", pDnsConfig->serverNum, DNS_MAX_SERVER_NUM);
 		status = OS_ERROR_INVALID_VALUE;
 		goto EXIT;
 	}
 
-	rrCache = osHash_create(rrBucketSize);
-	if(!rrCache)
+	gRRCache = osHash_create(pDnsConfig->rrHashSize);
+	if(!gRRCache)
     {
-        logError("fails to create qCache");
+        logError("fails to create gRRCache");
         status = OS_ERROR_MEMORY_ALLOC_FAILURE;
         goto EXIT;
     }
 
-	qCache = osHash_create(qBucketSize);
-    if(!qCache)
+	gQCache = osHash_create(pDnsConfig->qHashSize);
+    if(!gQCache)
     {
-        logError("fails to create qCache");
+        logError("fails to create gQCache");
         status = OS_ERROR_MEMORY_ALLOC_FAILURE;
         goto EXIT;
     }
 
 	//build serverSelInfo.  the serverSelInfo.serverInfo is sorted with least priority first
 	int color[DNS_MAX_SERVER_NUM] = {};
-	for(int i=0; i<pDnsServerConfig->serverNum; i++)
+	for(int i=0; i<pDnsConfig->serverNum; i++)
 	{
 		//sort to find the smallest value of priority
 		uint8_t curPriority = 255;
 		int curNode = -1;
-		for(int j=0; j<pDnsServerConfig->serverNum; j++)
+		for(int j=0; j<pDnsConfig->serverNum; j++)
 		{
 			if(color[j])
 			{
 				continue;
 			}
 
-			if(pDnsServerConfig->dnsServer[j].priority <= curPriority)
+			if(pDnsConfig->dnsServer[j].priority <= curPriority)
 			{
-				curPriority = pDnsServerConfig->dnsServer[j].priority;
+				curPriority = pDnsConfig->dnsServer[j].priority;
 				curNode = j;
 			}
 		}
@@ -110,20 +113,20 @@ osStatus_e dnsResolverInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServe
 			color[curNode] = 1;
 		}
 
-		status = osConvertPLton(&pDnsServerConfig->dnsServer[curNode].ipPort, true, &serverSelInfo.serverInfo[i].socketAddr);
+		status = osConvertPLton(&pDnsConfig->dnsServer[curNode].ipPort, true, &gServerSelInfo.serverInfo[i].socketAddr);
 		if(status != OS_STATUS_OK)
 		{
 			logError("fails to osConvertPLton for ipPortNum=%d", i);
 			goto EXIT;
 		}
 
-		serverSelInfo.serverInfo[i].priority = pDnsServerConfig->dnsServer[curNode].priority;
-		serverSelInfo.serverInfo[i].quarantineTimerId = 0;
+		gServerSelInfo.serverInfo[i].priority = pDnsConfig->dnsServer[curNode].priority;
+		gServerSelInfo.serverInfo[i].quarantineTimerId = 0;
 	}
 
-	serverSelInfo.serverSelMode = pDnsServerConfig->serverSelMode;
-	serverSelInfo.serverNum = pDnsServerConfig->serverNum;
-	serverSelInfo.curNodeSelIdx = 0;	
+	gServerSelInfo.serverSelMode = pDnsConfig->serverSelMode;
+	gServerSelInfo.serverNum = pDnsConfig->serverNum;
+	gServerSelInfo.curNodeSelIdx = 0;	
 
 	transport_localRegApp(TRANSPORT_APP_TYPE_DNS, dnsTpCallback);
 EXIT:
@@ -154,7 +157,7 @@ dnsQueryStatus_e dnsQueryInternal(osPointerLen_t* qName, dnsQType_e qType, bool 
 	{
 		//check if there is cached response
 		dnsRRCacheInfo_t* pRRCache = NULL;
-		status = dnsHashLookup(rrCache, qName, qType, (void**)&pRRCache);
+		status = dnsHashLookup(gRRCache, qName, qType, (void**)&pRRCache);
 		if(status != OS_STATUS_OK)
 		{
 			logError("fails to dnsHashLookup for qName(%r), qType(%d).", qName, qType);
@@ -166,7 +169,7 @@ dnsQueryStatus_e dnsQueryInternal(osPointerLen_t* qName, dnsQType_e qType, bool 
 			*qResponse = pRRCache->pDnsMsg;
 			if(!*qResponse)
 			{
-				logError("a dnsMsg is cached in rrCache, but is empty.");
+				logError("a dnsMsg is cached in gRRCache, but is empty.");
 				status = OS_ERROR_INVALID_VALUE;
 				goto EXIT;
 			}
@@ -229,16 +232,16 @@ static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQ
     dnsQCacheInfo_t* pQCache = NULL;
  
     /* find the request owners and forward the result. */
-    if(dnsHashLookup(qCache, qName, qType, (void**)&pQCache) != OS_STATUS_OK)
+    if(dnsHashLookup(gQCache, qName, qType, (void**)&pQCache) != OS_STATUS_OK)
     {
-        logError("fails to dnsHashLookup in qCache for qName(%r), qType(%d).", qName, qType);
+        logError("fails to dnsHashLookup in gQCache for qName(%r), qType(%d).", qName, qType);
         status = OS_ERROR_INVALID_VALUE;
         goto EXIT;
     }
 
     if(!pQCache)
     {
-        logInfo("find an entry in qCache hash for qName(%r), qType(%d), but pQCache is NULL.", qName, qType);
+        logInfo("find an entry in gQCache hash for qName(%r), qType(%d), but pQCache is NULL.", qName, qType);
         status = OS_ERROR_INVALID_VALUE;
         goto EXIT;
     }
@@ -286,7 +289,7 @@ static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCa
 	dnsQCacheInfo_t* pQuery = NULL;
 
 	uint32_t hashKeyInt = osHash_getKeyPL_extraKey(qName, false, qType);
-	osListElement_t* pHashElement = osHash_lookupByKey(qCache, &hashKeyInt, OSHASHKEY_INT);
+	osListElement_t* pHashElement = osHash_lookupByKey(gQCache, &hashKeyInt, OSHASHKEY_INT);
 	if(!pHashElement)
 	{
 		goto EXIT;
@@ -303,7 +306,7 @@ static bool dnsIsQueryOngoing(osPointerLen_t* qName, dnsQType_e qType, bool isCa
 	pQuery = pHashData->pData;
 	if(!pQuery)
 	{
-		logError("qName(%r), qType(%d) has an entry in qCache hash, but pQueryInfo is NULL, unexpected.", qName, qType);
+		logError("qName(%r), qType(%d) has an entry in gQCache hash, but pQueryInfo is NULL, unexpected.", qName, qType);
 		status = OS_ERROR_INVALID_VALUE;
 		goto EXIT;
 	}
@@ -448,7 +451,7 @@ static osStatus_e dnsPerformQuery(osPointerLen_t* qName, dnsQType_e qType, bool 
     pHashData->hashKeyType = OSHASHKEY_INT;
 	pHashData->hashKeyInt = osHash_getKeyPL_extraKey(qName, false, qType);
 	pHashData->pData = pQCache;
-	pQCache->pHashElement = osHash_add(qCache, pHashData);
+	pQCache->pHashElement = osHash_add(gQCache, pHashData);
 
 EXIT:
 	if(status != OS_STATUS_OK)
@@ -537,7 +540,7 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
     pHashData->hashKeyType = OSHASHKEY_INT;
     pHashData->hashKeyInt = osHash_getKeyPL_extraKey(&qName, false, pQCache->qType);
     pHashData->pData = pRRCache;
-    pRRCache->pHashElement = osHash_add(rrCache, pHashData);
+    pRRCache->pHashElement = osHash_add(gRRCache, pHashData);
 
     //start the ttl timer
     pRRCache->ttlTimerId = osStartTimer(ttl*1000, dns_onRRCacheTimeout, pRRCache);
@@ -1013,30 +1016,36 @@ static dnsServerInfo_t* dnsGetServer()
 {
 	dnsServerInfo_t* pServer = NULL;
 
-	if(serverSelInfo.serverSelMode == OS_NODE_SELECT_MODE_PRIORITY)
+	if(!gServerSelInfo.serverNum)
 	{
-		for(int i=0; i<serverSelInfo.serverNum; i++)
+		logError("dns server is not configured.");
+		goto EXIT;
+	}
+	
+	if(gServerSelInfo.serverSelMode == OS_NODE_SELECT_MODE_PRIORITY)
+	{
+		for(int i=0; i<gServerSelInfo.serverNum; i++)
 		{
-			if(serverSelInfo.serverInfo[i].quarantineTimerId)
+			if(gServerSelInfo.serverInfo[i].quarantineTimerId)
 			{
 				continue;
 			}
 
-			pServer = &serverSelInfo.serverInfo[i];
+			pServer = &gServerSelInfo.serverInfo[i];
 			break;
 		}
 	}
 	else
 	{
-		int nodeIdx = serverSelInfo.curNodeSelIdx++ % serverSelInfo.serverNum;
-		for(int i=nodeIdx; i < serverSelInfo.serverNum; i++)
+		int nodeIdx = gServerSelInfo.curNodeSelIdx++ % gServerSelInfo.serverNum;
+		for(int i=nodeIdx; i < gServerSelInfo.serverNum; i++)
 		{
-            if(serverSelInfo.serverInfo[i].quarantineTimerId)
+            if(gServerSelInfo.serverInfo[i].quarantineTimerId)
             {
                 continue;
             }
 
-            pServer = &serverSelInfo.serverInfo[i];
+            pServer = &gServerSelInfo.serverInfo[i];
             break;
         }
 
@@ -1044,24 +1053,25 @@ static dnsServerInfo_t* dnsGetServer()
 		{
 			for(int i=0; i<nodeIdx; i++)
 			{
-	            if(serverSelInfo.serverInfo[i].quarantineTimerId)
+	            if(gServerSelInfo.serverInfo[i].quarantineTimerId)
     	        {
         	        continue;
             	}
 
-            	pServer = &serverSelInfo.serverInfo[i];
+            	pServer = &gServerSelInfo.serverInfo[i];
             	break;
         	}
 		}
 	}
-	
+
+EXIT:	
 	return pServer;
 }
 
 
 static uint16_t dnsCreateTrId()
 {
-	return dnsTrId++;
+	return gDnsTrId++;
 }
 
 

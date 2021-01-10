@@ -42,13 +42,6 @@
 
 #define DNS_CLASS_IN  1
 
-#define DNS_MAX_SERVER_NUM	3
-#define DNS_MAX_ALLOWED_SERVER_NUM_PER_QUERY 2
-
-#define DNS_WAIT_RESPONSE_TIMEOUT	3000
-#define DNS_QUARANTINE_TIMEOUT		300000
-#define DNS_MAX_SERVER_QUARANTINE_NO_RESPONSE_NUM	3
-
 #define DNS_MAX_MSG_SIZE	512
 #define DNS_MAX_NAME_SIZE    125		//max domain name size
 #define DNS_MAX_DOMAIN_NAME_LABEL_SIZE	63
@@ -97,19 +90,6 @@ typedef enum {
 	DNS_NAPTR_FLAGS_P,
 	DNS_NAPTR_FLAGS_OTHER,	//not defined in rfc 2915 and not handled
 } dnsNaptrFlags_e;
-
-
-typedef struct {
-	osIpPort_t ipPort;
-	uint32_t priority;
-} dnsServer_t;
-
-
-typedef struct {
-	dnsServer_t dnsServer[DNS_MAX_SERVER_NUM];
-	int serverNum;
-	osNodeSelMode_e serverSelMode;
-} dnsServerConfig_t;
 
 
 typedef struct {
@@ -208,7 +188,7 @@ typedef struct {
 typedef void (*dnsResolver_callback_h)(dnsResResponse_t* pRR, void* pData);
 
 
-osStatus_e dnsInit(uint32_t rrBucketSize, uint32_t qBucketSize, dnsServerConfig_t* pDnsServerConfig);
+osStatus_e dnsResolverInit(char* dnsFileFolder, char* dnsXsdFileName, char* dnsXmlFileName);
 dnsQueryStatus_e dnsQuery(osPointerLen_t* qName, dnsQType_e qType, bool isResolveAll, bool isCacheRR, dnsResResponse_t** ppResResponse, dnsResolver_callback_h rrCallback, void* pData);
 
 	
