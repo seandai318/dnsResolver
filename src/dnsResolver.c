@@ -23,12 +23,13 @@
 
 #include "dnsResolver.h"
 #include "dnsResolverIntf.h"
+#include "dnsConfig.h"
 
 
 static __thread osHash_t* gRRCache;	//cached rr records
 static __thread osHash_t* gQCache;	//ongoing queries, each element contains dnsQCacheInfo_t, multiple requests with the same qName and qType are combined into one element with each request's appData is appended in appDataList
 //static __thread osList_t serverFd;	//each element contains dnsUdpActiveFdInfo_t.
-static dnsServerSelInfo_t gServerSelInfo;
+static __thread dnsServerSelInfo_t gServerSelInfo;
 static __thread uint16_t gDnsTrId;
 
 static osStatus_e dnsHashLookup(osHash_t* pHash, osPointerLen_t* qName, dnsQType_e qType, void** pHashData);
@@ -51,19 +52,20 @@ static void dnsRRCacheInfo_cleanup(void* data);
 
 
 
-osStatus_e dnsResolverInit(char* dnsFileFolder, char* dnsXsdFileName, char* dnsXmlFileName)
+//this function shall be called per thread, and after dns configuration is completed
+osStatus_e dnsResolver_init()
 {
 	osStatus_e status = OS_STATUS_OK;
-	dnsConfig_t* pDnsConfig = NULL;
+	const dnsConfig_t* pDnsConfig = NULL;
 
-	dnsConfig_init(dnsFileFolder, dnsXsdFileName, dnsXmlFileName);
+	pDnsConfig = dns_getConfig();
 	if(!pDnsConfig)
-	{
-		logError("failes to fetch dns configuration.");
-		status = OS_ERROR_NULL_POINTER;
-		goto EXIT;
-	}
-
+    {
+        logError("failes to fetch dns configuration.");
+        status = OS_ERROR_INVALID_VALUE;
+        goto EXIT;
+    }
+	
 	if(pDnsConfig->serverNum > DNS_MAX_SERVER_NUM)
 	{
 		logError("the number of DNS server num(%d) > DNS_MAX_SERVER_NUM(%d)", pDnsConfig->serverNum, DNS_MAX_SERVER_NUM);
@@ -421,7 +423,7 @@ static osStatus_e dnsPerformQuery(osPointerLen_t* qName, dnsQType_e qType, bool 
 	}
 	pQCache->pServerInfo = pServerInfo;
 
-	tpInfo.local.sin_addr.s_addr = 0;	//use the default ip in the tp layer
+	tpInfo.local = dnsConfig_getLocalSockAddr();
     tpInfo.peer = pServerInfo->socketAddr;
 	tpInfo.udpInfo.isUdpWaitResponse = true;
 	tpInfo.udpInfo.isEphemeralPort = true;

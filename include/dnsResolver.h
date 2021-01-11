@@ -53,7 +53,6 @@ typedef struct {
 } dnsServerSelInfo_t;
 
 
-osStatus_e dnsResolverInit(char* dnsFileFolder, char* dnsXsdFileName, char* dnsXmlFileName);
 dnsQueryStatus_e dnsQueryInternal(osPointerLen_t* qName, dnsQType_e qType, bool isCacheRR, dnsMessage_t** qResponse, dnsQCacheInfo_t** ppQCache, dnsResolver_callback_h rrCallback, void* pData);
 void dnsResResponse_memref(dnsResResponse_t* pDnsRsp);
 void dnsResResponse_cleanup(void* pData);

@@ -19,6 +19,7 @@ typedef struct {
     dnsServer_t dnsServer[DNS_MAX_SERVER_NUM];
     int serverNum;
     osNodeSelMode_e serverSelMode;
+	struct sockaddr_in localSockAddr;
 	uint32_t rrHashSize;
 	uint32_t qHashSize;
 } dnsConfig_t;
@@ -28,6 +29,7 @@ typedef enum {
     DNS_XML_SERVER_IP,
     DNS_XML_SERVER_SET,
     DNS_XML_SERVER_PORT,
+	DNS_XML_RESOLVER_IP,
     DNS_XML_Q_HASH_SIZE,
     DNS_XML_RR_HASH_SIZE,
 	DNS_XML_MAX_SERVER_NUM,
@@ -47,13 +49,15 @@ typedef enum {
 #define DNS_MAX_SERVER_QUARANTINE_NO_RESPONSE_NUM   dnsConfig_getQuarantineThreshold()	//default 3
 
 
-osStatus_e dnsConfig_init(char* dnsFileFolder, char* dnsXsdFileName, char* dnsXmlFileName);
 const dnsConfig_t* dns_getConfig();
 
 const int dnsConfig_getMaxAllowedServerPerQuery();
 const int dnsConfig_getWaitRspTimeout();
 const int dnsConfig_getQuarantineTimeout();
 const int dnsConfig_getQuarantineThreshold();
+
+struct sockaddr_in dnsConfig_getLocalSockAddr();
+
 
 
 #endif

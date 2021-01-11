@@ -48,8 +48,8 @@ void dnsTest()
 
     dnsInit(64, 64, &dnsServerConfig);
 #endif
-	dnsResolverInit("~/project/app/mas/config/", "dnsConfig.xsd", "dnsConfig.xml");
-	debug("dnsResolver is initialized");
+//	dnsResolverInit("~/project/app/mas/config/", "dnsConfig.xsd", "dnsConfig.xml");
+//	debug("dnsResolver is initialized");
 
 	startTest();
 
