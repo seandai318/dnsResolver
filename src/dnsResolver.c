@@ -151,6 +151,13 @@ dnsQueryStatus_e dnsQueryInternal(osPointerLen_t* qName, dnsQType_e qType, bool 
 		goto EXIT;
 	}
 
+	if(!qName->l)
+	{
+		logError("invalid qName, len=0.");
+		status = OS_ERROR_INVALID_VALUE;
+		goto EXIT;
+	}
+
 	*qResponse = NULL;
 	*ppQCache = NULL;
 
