@@ -1,6 +1,6 @@
 PROJECT_DIR ?= ${HOME}/project
 PROJECT_APP_DIR = $(PROJECT_DIR)/dnsResolver
-IDIR = $(PROJECT_DIR)/os/include $(PROJECT_APP_DIR)/include  $(PROJECT_DIR)/sip-stack/transport/include
+IDIR = $(PROJECT_DIR)/os/include $(PROJECT_APP_DIR)/include  $(PROJECT_DIR)/sip-stack/transport/include $(PROJECT_DIR)/sip-stack/tu/tuMgr/include $(PROJECT_DIR)/sip-stack/codec/include $(PROJECT_DIR)/sip-stack/trans/include
 #INC=$(foreach d, $(IDIR), -I$d)
 INC=$(IDIR:%=-I%)
 

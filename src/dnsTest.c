@@ -14,6 +14,8 @@
 #include "osSockAddr.h"
 #include "osTimer.h"
 
+#include "sipTU.h"
+
 #include "dnsResolverIntf.h"
 
 
@@ -26,8 +28,8 @@ static void dnsTest_onTimeout(uint64_t timerId, void* ptr);
 //for the following 3 query type, only one can be set to 1
 #define QUERY_A 0
 #define QUERY_SRV 0
-#define QUERY_NAPTR 0
-#define QUERY_ENUM	1
+#define QUERY_NAPTR 1
+#define QUERY_ENUM	0
 
 //dnsServerConfig_t dnsServerConfig;
 
@@ -85,7 +87,8 @@ static void startTest()
     dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_SRV, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
 #if QUERY_NAPTR
-    osPointerLen_t qName = {"mtas.ims.globalstar.com", strlen("mtas.ims.globalstar.com")};
+//    osPointerLen_t qName = {"mtas.ims.globalstar.com", strlen("mtas.ims.globalstar.com")};
+	osPointerLen_t qName = {"mwi-as.ims.globalstar.com", strlen("mwi-as.ims.globalstar.com")};
     dnsMessage_t* pDnsMsg = NULL;
     dnsQueryStatus_e qStatus = dnsQuery(&qName, DNS_QTYPE_NAPTR, isResolveAll, true, &pDnsRR, dnsTestCallback, NULL);
 #endif
@@ -166,6 +169,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 			debug("query response is DNS_RR_DATA_TYPE_MSG");
 
 			debug("qName=%s, qType=%d, pData=%p", pRR->pDnsRsp->query.qName, pRR->pDnsRsp->query.qType, pData);
+debug("to-remove, pRR=%p, pRR->pDnsRsp=%p, pRR->pDnsRsp->query.qName=%p", pRR, pRR->pDnsRsp, pRR->pDnsRsp->query.qName);
 
 			if(pRR->pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
 			{
@@ -185,6 +189,7 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 			{
 				dnsMessage_t* pDnsRsp = pRRLE->data;
 	            debug("qName=%s, qType=%d, pData=%p", pDnsRsp->query.qName, pDnsRsp->query.qType, pData);
+debug("to-remove, qType=%d, pRR=%p, pRR->pDnsRsp=%p, pRR->pDnsRsp->query.qName=%p, qName=%s", pDnsRsp->query.qType, pRR, pDnsRsp, pDnsRsp->query.qName, pDnsRsp->query.qName);
 
 	            if(pDnsRsp->hdr.flags & DNS_RCODE_MASK != DNS_RCODE_NO_ERROR)
     	        {
@@ -198,6 +203,14 @@ static void dnsTestCallback(dnsResResponse_t* pRR, void* pData)
 			break;
 		}
 	}
+
+#if QUERY_NAPTR
+    sipTuAddr_t nextHop = {};
+    if(!sipTu_getBestNextHop(pRR, false, &nextHop))
+    {
+        logError("could not find the next hop for %r.", &nextHop.ipPort.ip);
+	}
+#endif
 
 	return;
 }
