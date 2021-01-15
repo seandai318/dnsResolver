@@ -93,6 +93,13 @@ typedef enum {
 
 
 typedef struct {
+	osPointerLen_t* pQName;
+	dnsResStatus_e resStatus;
+	dnsRcode_e dnsRCode;	//only valid when resStatus == DNS_RES_STATUS_OK, for case when local is ok, but dns server rejected the query
+} dnsResStatusInfo_t;
+
+
+typedef struct {
 	uint32_t priority;
 	uint32_t weight;
 	uint32_t port;
@@ -179,7 +186,7 @@ typedef struct {
     union {
 		dnsMessage_t* pDnsRsp;	//when rrType == DNS_RR_DATA_TYPE_MSG
         osList_t dnsRspList;    //when rrType == DNS_RR_DATA_TYPE_MSGLIST, each element contains dnsMessage_t*
-        dnsResStatus_e status;	//when rrType == DNS_RR_DATA_TYPE_STATUS
+		dnsResStatusInfo_t status;	//hen rrType == DNS_RR_DATA_TYPE_STATUS
     };
 } dnsResResponse_t;
 

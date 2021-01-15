@@ -252,7 +252,8 @@ void dnsInternalCallback(dnsResResponse_t* pRR, void* pData)
 			osList_delete(&pCbData->pQNextInfo->pResResponse->dnsRspList);
 
  			pCbData->pQNextInfo->pResResponse->rrType = DNS_RR_DATA_TYPE_STATUS;
-			pCbData->pQNextInfo->pResResponse->status = DNS_RES_ERROR_RECURSIVE;	
+			pCbData->pQNextInfo->pResResponse->status.resStatus = DNS_RES_ERROR_RECURSIVE;	
+			pCbData->pQNextInfo->pResResponse->status.pQName = NULL;
 		
             if(osList_isEmpty(&pCbData->pQNextInfo->qCacheList))
             {

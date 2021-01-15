@@ -262,9 +262,10 @@ static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQ
     osListElement_t* pLE = pQCache->appDataList.head;
     while(pLE)
     {
+		dnsRcode_e replyCode = pDnsMsg->hdr.flags & DNS_RCODE_MASK;
 		dnsResResponse_t* pRR = osmalloc(sizeof(dnsResResponse_t), dnsResResponse_cleanup);
 	    //in this function, rrType can only take either DNS_RR_DATA_TYPE_MSG or DNS_RR_DATA_TYPE_STATUS		
-    	if(rrStatus == DNS_RES_STATUS_OK)
+    	if(rrStatus == DNS_RES_STATUS_OK && replyCode == DNS_RCODE_NO_ERROR)
     	{
         	pRR->rrType = DNS_RR_DATA_TYPE_MSG;
 	        //refer pDnsRsp for app.  When app frees pResResponse, RR will be dereferred
@@ -273,7 +274,9 @@ static dnsQCacheInfo_t* dnsRRMatchQCacheAndNotifyApp(osPointerLen_t* qName, dnsQ
     	else
     	{
         	pRR->rrType = DNS_RR_DATA_TYPE_STATUS;
-        	pRR->status = rrStatus;
+			pRR->status.pQName = qName;
+        	pRR->status.resStatus = rrStatus;
+			pRR->status.dnsRCode = replyCode;
     	}
 
         dnsQAppInfo_t* pApp = pLE->data;
@@ -518,7 +521,7 @@ static void dnsTpCallback(transportStatus_e tStatus, int fd, osMBuf_t* pBuf)
 
 	pQCache->pServerInfo->noRspCount = 0;
 
-	//app does not want this RR to cache
+	//app does not want this RR to cache, or error query response
 	if(!pQCache->isCacheRR || replyCode != DNS_RCODE_NO_ERROR )
 	{
 		logInfo("do not cache rr for qName(%r), qType=%d", &qName, pDnsMsg->query.qType);

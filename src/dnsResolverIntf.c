@@ -88,7 +88,8 @@ dnsQueryStatus_e dnsQuery(osPointerLen_t* qName, dnsQType_e qType, bool isResolv
             		case DNS_QUERY_STATUS_FAIL:
                 		osList_delete(&pCbData->pQNextInfo->pResResponse->dnsRspList);
                 		pCbData->pQNextInfo->pResResponse->rrType = DNS_RR_DATA_TYPE_STATUS;
-                		pCbData->pQNextInfo->pResResponse->status = DNS_RES_ERROR_RECURSIVE;
+                		pCbData->pQNextInfo->pResResponse->status.resStatus = DNS_RES_ERROR_RECURSIVE;
+						pCbData->pQNextInfo->pResResponse->status.pQName = NULL;
                 		*ppResResponse = pCbData->pQNextInfo->pResResponse;
 						pCbData->pQNextInfo->pResResponse = NULL;
 
