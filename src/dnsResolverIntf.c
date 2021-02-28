@@ -128,3 +128,44 @@ EXIT:
 	
 	return qStatus;
 }
+
+
+bool dnsResolver_isRspNoError(dnsResResponse_t* pRR)
+{
+	bool isRspNoError = true;
+
+	if(!pRR)
+	{
+		isRspNoError = false;
+		goto EXIT;
+	}
+
+	switch(pRR->rrType)
+	{
+		case DNS_RR_DATA_TYPE_MSG:
+			isRspNoError = (pRR->pDnsRsp->hdr.flags & DNS_RCODE_MASK) == DNS_RCODE_NO_ERROR;
+            break;
+		case DNS_RR_DATA_TYPE_MSGLIST:
+		{
+			osListElement_t* pRRLE = pRR->dnsRspList.head;
+			while(pRRLE)
+			{
+				dnsMessage_t* pDnsRsp = pRRLE->data;
+				if((pDnsRsp->hdr.flags & DNS_RCODE_MASK) != DNS_RCODE_NO_ERROR)
+				{
+					isRspNoError = false;
+					break;
+				}
+
+				pRRLE = pRRLE->next;
+			}
+            break;
+        }
+        default:
+			isRspNoError = false;
+			break;
+	}
+
+EXIT:
+	return isRspNoError;
+}
